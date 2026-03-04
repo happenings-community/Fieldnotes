@@ -24,6 +24,10 @@ src-tauri/resources/*.happ
 *.swp
 *.swo
 
+# Environment (contains client_id — use .env.example as template)
+.env
+.env.local
+
 # OS
 .DS_Store
 Thumbs.db
