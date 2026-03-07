@@ -471,6 +471,69 @@ async fn notify_vault_revoke(app_name: &str, app_agent_pub_key: &str) -> Result<
     Ok(())
 }
 
+/// Export all ProofPoll data (polls + votes) for Vault auto-backup.
+#[tauri::command]
+pub async fn get_export_data(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+) -> Result<serde_json::Value, String> {
+    let client = state.app_client.lock().await;
+    let client = client.as_ref().ok_or("Conductor not ready")?;
+
+    // Fetch all polls
+    let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
+    let result = call_zome(client, POLLS_ZOME, "get_all_polls", payload).await?;
+    let records: Vec<Record> = result.decode().map_err(|e| e.to_string())?;
+
+    let mut polls_json = Vec::new();
+    for record in &records {
+        let poll: Poll = decode_entry(record)?;
+        let hash = record.action_address().to_string();
+        let author = record.action().author().to_string();
+
+        // Fetch votes for this poll
+        let vote_payload =
+            ExternIO::encode(record.action_address().clone()).map_err(|e| e.to_string())?;
+        let vote_result = call_zome(client, POLLS_ZOME, "get_poll_votes", vote_payload).await;
+
+        let votes: Vec<serde_json::Value> = match vote_result {
+            Ok(vr) => {
+                let vote_records: Vec<Record> = vr.decode().unwrap_or_default();
+                vote_records
+                    .iter()
+                    .filter_map(|vr| {
+                        let vote: Vote = decode_entry(vr).ok()?;
+                        Some(serde_json::json!({
+                            "option_index": vote.option_index,
+                            "author": vr.action().author().to_string(),
+                        }))
+                    })
+                    .collect()
+            }
+            Err(_) => Vec::new(),
+        };
+
+        polls_json.push(serde_json::json!({
+            "hash": hash,
+            "author": author,
+            "title": poll.title,
+            "description": poll.description,
+            "options": poll.options,
+            "created_at": poll.created_at,
+            "closes_at": poll.closes_at,
+            "votes": votes,
+        }));
+    }
+
+    Ok(serde_json::json!({
+        "version": 1,
+        "exported_at": std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_secs(),
+        "polls": polls_json,
+    }))
+}
+
 #[tauri::command]
 pub async fn get_linked_agents(
     state: tauri::State<'_, std::sync::Arc<AppState>>,

@@ -99,6 +99,7 @@ pub fn run() {
             commands::get_linked_agents,
             commands::get_identity_link,
             commands::revoke_identity_link,
+            commands::get_export_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
