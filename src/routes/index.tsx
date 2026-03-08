@@ -7,10 +7,16 @@ export default component$(() => {
   const linked = useContext(linkedContext);
   const polls = useSignal<PollListItem[]>([]);
   const loading = useSignal(true);
+  const loadingSlow = useSignal(false);
   const error = useSignal<string | null>(null);
   const showSignIn = useSignal(false);
 
-  useVisibleTask$(async () => {
+  useVisibleTask$(async ({ cleanup }) => {
+    const timer = setTimeout(() => {
+      loadingSlow.value = true;
+    }, 3000);
+    cleanup(() => clearTimeout(timer));
+
     try {
       polls.value = await getAllPolls();
     } catch (e: any) {
@@ -80,7 +86,14 @@ export default component$(() => {
       </div>
 
       {loading.value ? (
-        <div class="text-gray-400">Loading polls...</div>
+        <div class="text-gray-400">
+          <p>Loading polls...</p>
+          {loadingSlow.value && (
+            <p class="text-gray-500 text-sm mt-2">
+              Syncing with the network — first load can take a moment.
+            </p>
+          )}
+        </div>
       ) : error.value ? (
         <div class="text-red-400">{error.value}</div>
       ) : polls.value.length === 0 ? (

@@ -27,7 +27,8 @@ pub async fn install_dna(admin_port: u16, resource_dir: &Path) -> Result<AgentPu
     .await
     .map_err(|e| format!("Failed to connect to admin WebSocket: {}", e))?;
 
-    // Check if already installed.
+    // Check if already installed. If the app is disabled (e.g. lair was reset
+    // and the old agent key is gone), uninstall so it gets reinstalled fresh.
     let existing_apps = admin_ws
         .list_apps(None)
         .await
@@ -35,8 +36,16 @@ pub async fn install_dna(admin_port: u16, resource_dir: &Path) -> Result<AgentPu
 
     for app in &existing_apps {
         if app.installed_app_id == APP_ID {
-            log::info!("ProofPoll DNA already installed, skipping");
-            return Ok(app.agent_pub_key.clone());
+            if matches!(app.status, holochain_types::prelude::AppStatus::Disabled(_)) {
+                log::warn!("ProofPoll DNA installed but disabled, reinstalling...");
+                admin_ws
+                    .uninstall_app(APP_ID.to_string(), false)
+                    .await
+                    .map_err(|e| format!("Failed to uninstall stale app: {}", e))?;
+            } else {
+                log::info!("ProofPoll DNA already installed, skipping");
+                return Ok(app.agent_pub_key.clone());
+            }
         }
     }
 
