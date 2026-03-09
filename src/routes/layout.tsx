@@ -2,6 +2,7 @@ import { component$, Slot, useContextProvider, useSignal, useVisibleTask$ } from
 import { Link, useLocation } from "@builder.io/qwik-city";
 import { invoke } from "@tauri-apps/api/core";
 import { linkedContext, displayNameContext, profilePictureContext } from "~/lib/context";
+import { sanitizeImageSrc } from "~/lib/sanitize";
 import { getLinkedAgents } from "~/lib/holochain";
 
 
@@ -229,9 +230,9 @@ export default component$(() => {
           (linked.value && displayName.value ? (
             <div class="flex items-center gap-2">
               <span class="text-sm text-gray-300">{displayName.value}</span>
-              {profilePicture.value ? (
+              {sanitizeImageSrc(profilePicture.value) ? (
                 <img
-                  src={profilePicture.value}
+                  src={sanitizeImageSrc(profilePicture.value)!}
                   alt="Profile"
                   class="h-8 w-8 rounded-full object-cover border border-gray-600"
                   width={32}

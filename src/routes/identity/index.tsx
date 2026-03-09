@@ -2,6 +2,7 @@ import { component$, useContext, useSignal, useVisibleTask$, $ } from "@builder.
 import { useLocation, useNavigate } from "@builder.io/qwik-city";
 import { invoke } from "@tauri-apps/api/core";
 import { linkedContext, displayNameContext, profilePictureContext } from "~/lib/context";
+import { sanitizeImageSrc } from "~/lib/sanitize";
 import {
   getLinkedAgents,
   commitIdentityLink,
@@ -233,9 +234,9 @@ export default component$(() => {
           {/* Profile card */}
           <div class="bg-gray-900 border border-gray-800 rounded-lg p-6">
             <div class="flex items-center gap-4 mb-4">
-              {profilePicture.value ? (
+              {sanitizeImageSrc(profilePicture.value) ? (
                 <img
-                  src={profilePicture.value}
+                  src={sanitizeImageSrc(profilePicture.value)!}
                   alt="Profile"
                   class="h-14 w-14 rounded-full object-cover border border-gray-600"
                   width={56}
