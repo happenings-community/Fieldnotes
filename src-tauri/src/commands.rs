@@ -542,8 +542,11 @@ async fn notify_vault_revoke(app_name: &str, app_agent_pub_key: &str) -> Result<
     Ok(())
 }
 
-/// Export all ProofPoll data (polls + votes) for Vault auto-backup.
-/// Includes cryptographic key access information for CAL compliance.
+/// Export this user's ProofPoll data for Vault auto-backup.
+/// Only includes the user's own data (CAL compliance):
+///   - Polls they created (with all votes for context)
+///   - Their votes on other people's polls
+///   - Cryptographic keys to recreate their identity
 #[tauri::command]
 pub async fn get_export_data(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
@@ -551,59 +554,84 @@ pub async fn get_export_data(
     let client = state.app_client.lock().await;
     let client = client.as_ref().ok_or("Conductor not ready")?;
 
-    // Fetch all polls
+    let my_key = {
+        let key = state.agent_pub_key.lock().unwrap();
+        key.clone().ok_or("Agent key not available")?
+    };
+
+    // Fetch all polls from the DHT
     let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
     let result = call_zome(client, POLLS_ZOME, "get_all_polls", payload).await?;
     let records: Vec<Record> = result.decode().map_err(|e| e.to_string())?;
 
-    let mut polls_json = Vec::new();
+    let mut my_polls = Vec::new();
+    let mut my_votes = Vec::new();
+
     for record in &records {
         let poll: Poll = decode_entry(record)?;
         let hash = record.action_address().to_string();
         let author = record.action().author().to_string();
+        let is_my_poll = author == my_key;
 
         // Fetch votes for this poll
         let vote_payload =
             ExternIO::encode(record.action_address().clone()).map_err(|e| e.to_string())?;
         let vote_result = call_zome(client, POLLS_ZOME, "get_poll_votes", vote_payload).await;
 
-        let votes: Vec<serde_json::Value> = match vote_result {
+        let all_votes: Vec<(u32, String)> = match vote_result {
             Ok(vr) => {
                 let vote_records: Vec<Record> = vr.decode().unwrap_or_default();
                 vote_records
                     .iter()
                     .filter_map(|vr| {
                         let vote: Vote = decode_entry(vr).ok()?;
-                        Some(serde_json::json!({
-                            "option_index": vote.option_index,
-                            "author": vr.action().author().to_string(),
-                        }))
+                        Some((vote.option_index, vr.action().author().to_string()))
                     })
                     .collect()
             }
             Err(_) => Vec::new(),
         };
 
-        polls_json.push(serde_json::json!({
-            "hash": hash,
-            "author": author,
-            "title": poll.title,
-            "description": poll.description,
-            "options": poll.options,
-            "created_at": poll.created_at,
-            "closes_at": poll.closes_at,
-            "votes": votes,
-        }));
+        // If I created this poll, include it with all its votes
+        if is_my_poll {
+            let votes_json: Vec<serde_json::Value> = all_votes
+                .iter()
+                .map(|(idx, voter)| serde_json::json!({
+                    "option_index": idx,
+                    "voter": voter,
+                }))
+                .collect();
+
+            my_polls.push(serde_json::json!({
+                "hash": hash,
+                "title": poll.title,
+                "description": poll.description,
+                "options": poll.options,
+                "created_at": poll.created_at,
+                "closes_at": poll.closes_at,
+                "total_votes": votes_json.len(),
+                "votes": votes_json,
+            }));
+        }
+
+        // If I voted on this poll (whether mine or someone else's), record it
+        for (option_index, voter) in &all_votes {
+            if voter == &my_key {
+                my_votes.push(serde_json::json!({
+                    "poll_hash": hash,
+                    "poll_title": poll.title,
+                    "option_index": option_index,
+                    "option_text": poll.options.get(*option_index as usize),
+                }));
+            }
+        }
     }
 
     // CAL compliance: include cryptographic key access information
-    let agent_pub_key = state.agent_pub_key.lock().unwrap().clone();
     let passphrase = state.passphrase.lock().unwrap().clone();
     let lair_dir = state.data_dir.join("lair");
 
     // Include lair keystore data (store_file) for portable key backup.
-    // The store_file is a small SQLite database (~4KB) containing the encrypted seed.
-    // With the passphrase + this file, the user can reconstruct their keystore.
     let store_file_path = lair_dir.join("store_file");
     let lair_keystore_data = if store_file_path.exists() {
         use base64::Engine;
@@ -616,19 +644,35 @@ pub async fn get_export_data(
     };
 
     Ok(serde_json::json!({
-        "version": 2,
-        "exported_at": std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs(),
-        "agent_pub_key": agent_pub_key,
-        "crypto_keys": {
-            "lair_passphrase": passphrase,
-            "lair_keystore_path": lair_dir.to_string_lossy(),
-            "lair_keystore_data": lair_keystore_data,
-            "note": "Your cryptographic keys are stored in the lair keystore. The passphrase unlocks the keystore. The lair_keystore_data field contains a base64-encoded backup of your encrypted keystore file. To restore: decode the base64 data, save as 'store_file' in a lair directory, and use the lair-keystore CLI with your passphrase."
+        "_readme": "Your ProofPoll data. Only includes polls you created and votes you cast.",
+
+        "format": {
+            "version": 3,
+            "exported_at": std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
         },
-        "polls": polls_json,
+
+        "you": {
+            "agent_pub_key": my_key,
+        },
+
+        "keys": {
+            "_readme": "Your lair keystore contains the private signing key for your ProofPoll identity. The passphrase unlocks it. To restore: decode lair_keystore_data from base64, save as 'store_file' in a lair directory, and run lair-keystore with the passphrase.",
+            "lair_passphrase": passphrase,
+            "lair_keystore_data": lair_keystore_data,
+        },
+
+        "polls_created": {
+            "count": my_polls.len(),
+            "polls": my_polls,
+        },
+
+        "votes_cast": {
+            "count": my_votes.len(),
+            "votes": my_votes,
+        },
     }))
 }
 
