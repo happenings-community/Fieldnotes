@@ -1,6 +1,7 @@
 import { component$, Slot, useContextProvider, useSignal, useVisibleTask$ } from "@builder.io/qwik";
 import { Link, useLocation } from "@builder.io/qwik-city";
 import { invoke } from "@tauri-apps/api/core";
+import { listen } from "@tauri-apps/api/event";
 import { linkedContext, displayNameContext, profilePictureContext } from "~/lib/context";
 import { sanitizeImageSrc } from "~/lib/sanitize";
 import { getLinkedAgents } from "~/lib/holochain";
@@ -9,7 +10,6 @@ import { getLinkedAgents } from "~/lib/holochain";
 interface AppStatus {
   ready: boolean;
   agent_pub_key: string | null;
-  app_port: number | null;
   conductor_status:
     | { status: "stopped" }
     | { status: "starting"; message: string }
@@ -31,6 +31,21 @@ export default component$(() => {
   useVisibleTask$(({ cleanup }) => {
     let active = true;
     let stopAutoBackup: (() => void) | null = null;
+    let unlistenStatus: (() => void) | null = null;
+
+    // Listen for conductor-status events from the health monitor
+    listen<AppStatus["conductor_status"]>("conductor-status", (event) => {
+      const cs = event.payload;
+      if (cs.status === "error") {
+        status.value = {
+          ready: false,
+          agent_pub_key: status.value?.agent_pub_key ?? null,
+          conductor_status: cs,
+        };
+      }
+    }).then((unlisten) => {
+      unlistenStatus = unlisten;
+    });
 
     const startBackup = async () => {
       if (stopAutoBackup) return; // Already running
@@ -180,6 +195,7 @@ export default component$(() => {
       active = false;
       clearInterval(linkPoll);
       stopBackup();
+      if (unlistenStatus) unlistenStatus();
     });
   });
 
@@ -264,14 +280,41 @@ export default component$(() => {
           </div>
         ) : !status.value.ready ? (
           <div class="flex flex-col items-center justify-center h-64 gap-4">
-            <div class="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
-            <div class="text-gray-400">
-              {status.value.conductor_status.status === "starting"
-                ? status.value.conductor_status.message
-                : status.value.conductor_status.status === "error"
-                  ? `Error: ${status.value.conductor_status.message}`
-                  : "Starting conductor..."}
-            </div>
+            {status.value.conductor_status.status === "error" ? (
+              <>
+                <div class="w-12 h-12 rounded-full bg-red-900/40 flex items-center justify-center">
+                  <svg class="w-6 h-6 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width={2}>
+                    <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+                  </svg>
+                </div>
+                <div class="text-center max-w-md">
+                  <h2 class="text-lg font-semibold text-white mb-1">Connection Lost</h2>
+                  <p class="text-gray-400 text-sm mb-4">
+                    {status.value.conductor_status.message}
+                  </p>
+                  <button
+                    type="button"
+                    onClick$={() => window.close()}
+                    class="bg-indigo-600 hover:bg-indigo-500 text-white px-5 py-2 rounded-full text-sm font-medium"
+                  >
+                    Close App
+                  </button>
+                  <p class="text-gray-600 text-xs mt-2">Reopen ProofPoll after closing to reconnect.</p>
+                </div>
+              </>
+            ) : (
+              <>
+                <div class="w-8 h-8 border-2 border-indigo-500 border-t-transparent rounded-full animate-spin" />
+                <div class="text-gray-400">
+                  {status.value.conductor_status.status === "starting"
+                    ? status.value.conductor_status.message
+                    : "Starting conductor..."}
+                </div>
+                <p class="text-gray-600 text-xs max-w-xs text-center">
+                  The local Holochain node is starting up. This usually takes a few seconds.
+                </p>
+              </>
+            )}
           </div>
         ) : (
           <Slot />

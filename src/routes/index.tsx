@@ -1,7 +1,10 @@
-import { component$, useContext, useSignal, useVisibleTask$ } from "@builder.io/qwik";
+import { component$, useContext, useSignal, useComputed$, useVisibleTask$, $ } from "@builder.io/qwik";
 import { Link } from "@builder.io/qwik-city";
+import { invoke } from "@tauri-apps/api/core";
 import { linkedContext } from "~/lib/context";
-import { getAllPolls, type PollListItem } from "~/lib/holochain";
+import { getAllPolls, getPollVotes, type PollListItem } from "~/lib/holochain";
+
+type Filter = "all" | "created" | "voted";
 
 export default component$(() => {
   const linked = useContext(linkedContext);
@@ -10,6 +13,59 @@ export default component$(() => {
   const loadingSlow = useSignal(false);
   const error = useSignal<string | null>(null);
   const showSignIn = useSignal(false);
+  const filter = useSignal<Filter>("all");
+  const myAgent = useSignal<string | null>(null);
+  // Set of poll hashes the user has voted in
+  const votedPolls = useSignal<Set<string>>(new Set());
+  const votedLoading = useSignal(false);
+
+  const loadPolls = $(async () => {
+    loading.value = true;
+    error.value = null;
+    try {
+      const [allPolls, status] = await Promise.all([
+        getAllPolls(),
+        invoke<{ agent_pub_key: string | null }>("get_app_status"),
+      ]);
+      polls.value = allPolls;
+      myAgent.value = status.agent_pub_key;
+    } catch (e: any) {
+      error.value = e.message || "Failed to load polls";
+    } finally {
+      loading.value = false;
+    }
+  });
+
+  // Load which polls the user voted in (called once when "Voted" filter is first selected)
+  const loadVotedPolls = $(async () => {
+    if (votedPolls.value.size > 0 || !myAgent.value || polls.value.length === 0) return;
+    votedLoading.value = true;
+    try {
+      const results = await Promise.all(
+        polls.value.map(async (p) => {
+          try {
+            const votes = await getPollVotes(p.hash);
+            const voted = votes.some((v) => v.author === myAgent.value);
+            return voted ? p.hash : null;
+          } catch {
+            return null;
+          }
+        }),
+      );
+      votedPolls.value = new Set(results.filter((h): h is string => h !== null));
+    } finally {
+      votedLoading.value = false;
+    }
+  });
+
+  const filteredPolls = useComputed$(() => {
+    if (filter.value === "all") return polls.value;
+    if (filter.value === "created") {
+      return polls.value.filter((p) => p.author === myAgent.value);
+    }
+    // "voted"
+    return polls.value.filter((p) => votedPolls.value.has(p.hash));
+  });
 
   useVisibleTask$(async ({ cleanup }) => {
     const timer = setTimeout(() => {
@@ -17,13 +73,7 @@ export default component$(() => {
     }, 3000);
     cleanup(() => clearTimeout(timer));
 
-    try {
-      polls.value = await getAllPolls();
-    } catch (e: any) {
-      error.value = e.message || "Failed to load polls";
-    } finally {
-      loading.value = false;
-    }
+    await loadPolls();
   });
 
   return (
@@ -85,6 +135,31 @@ export default component$(() => {
         )}
       </div>
 
+      {/* Filter tabs */}
+      {!loading.value && !error.value && polls.value.length > 0 && (
+        <div class="flex gap-1 mb-5 bg-gray-900 rounded-lg p-1 w-fit">
+          {(["all", "created", "voted"] as const).map((f) => (
+            <button
+              key={f}
+              type="button"
+              onClick$={async () => {
+                filter.value = f;
+                if (f === "voted" && votedPolls.value.size === 0) {
+                  await loadVotedPolls();
+                }
+              }}
+              class={`px-3 py-1.5 rounded-md text-sm font-medium transition-colors ${
+                filter.value === f
+                  ? "bg-gray-700 text-white"
+                  : "text-gray-400 hover:text-gray-200"
+              }`}
+            >
+              {f === "all" ? "All" : f === "created" ? "Created" : "Voted"}
+            </button>
+          ))}
+        </div>
+      )}
+
       {loading.value ? (
         <div class="text-gray-400">
           <p>Loading polls...</p>
@@ -95,7 +170,24 @@ export default component$(() => {
           )}
         </div>
       ) : error.value ? (
-        <div class="text-red-400">{error.value}</div>
+        <div class="bg-red-900/20 border border-red-800/40 rounded-lg p-5 max-w-md">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-red-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width={2}>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <p class="text-red-300 text-sm font-medium mb-1">Couldn't load polls</p>
+              <p class="text-red-400/70 text-xs mb-3">{error.value}</p>
+              <button
+                type="button"
+                onClick$={() => loadPolls()}
+                class="text-xs bg-red-800/40 hover:bg-red-800/60 text-red-300 px-3 py-1.5 rounded-full font-medium transition-colors"
+              >
+                Try again
+              </button>
+            </div>
+          </div>
+        </div>
       ) : polls.value.length === 0 ? (
         <div class="text-center py-16">
           <p class="text-gray-400 text-lg mb-4">No polls yet</p>
@@ -116,9 +208,36 @@ export default component$(() => {
             </button>
           )}
         </div>
+      ) : votedLoading.value ? (
+        <div class="text-gray-400">Loading your votes...</div>
+      ) : filteredPolls.value.length === 0 ? (
+        <div class="text-center py-16">
+          <p class="text-gray-400 text-lg mb-4">
+            {filter.value === "created"
+              ? "You haven't created any polls yet"
+              : "You haven't voted on any polls yet"}
+          </p>
+          {linked.value ? (
+            <Link
+              href={filter.value === "created" ? "/create/" : "/"}
+              onClick$={() => { if (filter.value === "voted") filter.value = "all"; }}
+              class="text-indigo-400 hover:text-indigo-300"
+            >
+              {filter.value === "created" ? "Create your first poll" : "Browse all polls"}
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick$={() => (showSignIn.value = true)}
+              class="text-indigo-400 hover:text-indigo-300"
+            >
+              Sign in to {filter.value === "created" ? "create polls" : "vote"}
+            </button>
+          )}
+        </div>
       ) : (
         <div class="grid gap-4 md:grid-cols-2 lg:grid-cols-3">
-          {polls.value.map((p) => {
+          {filteredPolls.value.map((p) => {
             const isOpen =
               !p.poll.closes_at ||
               p.poll.closes_at > Date.now() / 1000;

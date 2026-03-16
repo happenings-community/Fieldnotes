@@ -44,3 +44,6 @@ base64 = "0.22"
 
 # HTTP client for IPC notifications to Vault
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Process liveness check
+libc = "0.2"

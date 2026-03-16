@@ -3986,6 +3986,7 @@ dependencies = [
  "holochain_client",
  "holochain_types",
  "lair_keystore_api",
+ "libc",
  "log",
  "rand 0.8.5",
  "reqwest 0.12.28",

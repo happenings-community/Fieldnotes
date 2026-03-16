@@ -194,7 +194,27 @@ export default component$(() => {
   }
 
   if (error.value) {
-    return <div class="text-red-400">{error.value}</div>;
+    return (
+      <div class="max-w-md mx-auto mt-12">
+        <div class="bg-red-900/20 border border-red-800/40 rounded-lg p-5">
+          <div class="flex items-start gap-3">
+            <svg class="w-5 h-5 text-red-400 mt-0.5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width={2}>
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v2m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            </svg>
+            <div>
+              <p class="text-red-300 text-sm font-medium mb-1">Couldn't load poll</p>
+              <p class="text-red-400/70 text-xs mb-3">{error.value}</p>
+              <a
+                href={`/poll/${pollHash}/`}
+                class="text-xs bg-red-800/40 hover:bg-red-800/60 text-red-300 px-3 py-1.5 rounded-full font-medium transition-colors inline-block"
+              >
+                Try again
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!poll.value) return null;

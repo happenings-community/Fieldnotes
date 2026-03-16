@@ -140,15 +140,83 @@ async fn call_zome(
     use holochain_client::ZomeCallTarget;
     use holochain_types::prelude::RoleName;
 
-    client
+    let result = client
         .call_zome(
             ZomeCallTarget::RoleName(RoleName::from(ROLE_NAME)),
             ZomeName::from(zome),
             FunctionName::from(fn_name),
-            payload,
+            payload.clone(),
         )
+        .await;
+
+    match result {
+        Ok(r) => Ok(r),
+        Err(e) => {
+            let err_str = format!("{}", e);
+            // Auto-recover from CellDisabled (e.g. after unclean shutdown)
+            if err_str.contains("CellDisabled") {
+                log::warn!("CellDisabled detected, attempting auto-recovery...");
+                if let Err(re) = try_reenable_app().await {
+                    log::error!("Auto-recovery failed: {}", re);
+                    return Err(friendly_error(&err_str));
+                }
+                // Retry the zome call once
+                log::info!("Retrying zome call after re-enabling app...");
+                client
+                    .call_zome(
+                        ZomeCallTarget::RoleName(RoleName::from(ROLE_NAME)),
+                        ZomeName::from(zome),
+                        FunctionName::from(fn_name),
+                        payload,
+                    )
+                    .await
+                    .map_err(|e2| friendly_error(&format!("{}", e2)))
+            } else {
+                Err(friendly_error(&err_str))
+            }
+        }
+    }
+}
+
+/// Attempt to re-enable the app via admin websocket.
+async fn try_reenable_app() -> Result<(), String> {
+    use holochain_client::AdminWebsocket;
+
+    let admin_ws = AdminWebsocket::connect(
+        format!("localhost:{}", crate::conductor::ADMIN_WS_PORT),
+        Some("proofpoll".to_string()),
+    )
+    .await
+    .map_err(|e| format!("Failed to connect to admin WS for recovery: {}", e))?;
+
+    admin_ws
+        .enable_app(crate::dna::APP_ID.to_string())
         .await
-        .map_err(|e| format!("Zome call failed: {}", e))
+        .map_err(|e| format!("Failed to re-enable app: {}", e))?;
+
+    log::info!("App re-enabled successfully");
+    Ok(())
+}
+
+/// Translate raw Holochain errors into user-friendly messages.
+fn friendly_error(raw: &str) -> String {
+    if raw.contains("CellDisabled") {
+        "Your data cell was temporarily disabled and could not be recovered automatically. Please restart the app.".into()
+    } else if raw.contains("WebsocketError") || raw.contains("ConnectionReset") || raw.contains("Io(") {
+        "Lost connection to the Holochain conductor. It may have stopped unexpectedly.".into()
+    } else if raw.contains("timeout") || raw.contains("Timeout") {
+        "The request timed out. The network may be slow or unreachable.".into()
+    } else if raw.contains("Conductor returned an error") {
+        // Strip the nested conductor error wrapper for clarity
+        if let Some(inner) = raw.split("InternalError(\"").nth(1) {
+            let inner = inner.trim_end_matches("\")");
+            format!("Conductor error: {}", inner)
+        } else {
+            format!("Conductor error: {}", raw)
+        }
+    } else {
+        format!("Something went wrong: {}", raw)
+    }
 }
 
 /// Parse a uhCAk... agent key string into an AgentPubKey.

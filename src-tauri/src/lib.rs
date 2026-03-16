@@ -58,6 +58,7 @@ pub fn run() {
                 let passphrase = startup_state.passphrase.lock().unwrap().clone();
                 let data_dir = startup_state.data_dir.clone();
 
+                let monitor_handle = app_handle.clone();
                 match conductor::start_holochain(
                     app_handle,
                     data_dir,
@@ -70,6 +71,7 @@ pub fn run() {
                         log::info!("Conductor started, agent: {}", agent_key);
                         let admin_port = handle.admin_port;
                         let app_port = handle.app_port;
+                        let conductor_pid = handle.conductor_pid;
 
                         *startup_state.conductor_handle.lock().unwrap() = Some(handle);
                         *startup_state.agent_pub_key.lock().unwrap() = Some(agent_key);
@@ -77,6 +79,13 @@ pub fn run() {
                         *startup_state.lair_client.lock().await = Some(lair_client);
                         *startup_state.conductor_status.lock().unwrap() =
                             conductor::ConductorStatus::Ready { admin_port, app_port };
+
+                        // Start background health monitor
+                        conductor::spawn_health_monitor(
+                            conductor_pid,
+                            startup_state.clone(),
+                            monitor_handle,
+                        );
                     }
                     Err(e) => {
                         log::error!("Failed to start conductor: {}", e);

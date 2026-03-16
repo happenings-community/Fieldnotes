@@ -12,7 +12,7 @@ use holochain_types::app::AppBundleSource;
 use holochain_types::prelude::AgentPubKey;
 use std::path::Path;
 
-const APP_ID: &str = "proofpoll_v1_0";
+pub const APP_ID: &str = "proofpoll_v1_0";
 const HAPP_FILE: &str = "proofpoll_v1_0_happ.happ";
 
 /// Install the ProofPoll DNA if not already present.
@@ -43,7 +43,12 @@ pub async fn install_dna(admin_port: u16, resource_dir: &Path) -> Result<AgentPu
                     .await
                     .map_err(|e| format!("Failed to uninstall stale app: {}", e))?;
             } else {
-                log::info!("ProofPoll DNA already installed, skipping");
+                // Re-enable to recover any disabled cells (e.g. after unclean shutdown)
+                log::info!("ProofPoll DNA already installed, re-enabling to ensure cells are active");
+                admin_ws
+                    .enable_app(APP_ID.to_string())
+                    .await
+                    .map_err(|e| format!("Failed to re-enable app: {}", e))?;
                 return Ok(app.agent_pub_key.clone());
             }
         }

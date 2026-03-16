@@ -9,7 +9,7 @@ use std::process::{Child, Stdio};
 use tauri::Emitter;
 
 /// Admin WebSocket port (different from Vault's 4455 so both can run simultaneously).
-const ADMIN_WS_PORT: u16 = 4466;
+pub const ADMIN_WS_PORT: u16 = 4466;
 
 /// Holochain test bootstrap/signaling server.
 const BOOTSTRAP_URL: &str = "https://dev-test-bootstrap2.holochain.org/";
@@ -21,6 +21,7 @@ pub struct ConductorHandle {
     pub conductor_child: Child,
     pub admin_port: u16,
     pub app_port: u16,
+    pub conductor_pid: u32,
 }
 
 impl ConductorHandle {
@@ -350,12 +351,46 @@ pub async fn start_holochain(
         agent_key_str,
     );
 
+    let conductor_pid = conductor_child.id();
     let handle = ConductorHandle {
         lair_child,
         conductor_child,
         admin_port: ADMIN_WS_PORT,
         app_port,
+        conductor_pid,
     };
 
     Ok((handle, agent_key_str, app_client, lair_client))
+}
+
+/// Spawn a background task that monitors the conductor process.
+/// If the conductor exits unexpectedly, updates ConductorStatus and emits
+/// a frontend event so the UI can show a recovery prompt.
+pub fn spawn_health_monitor(
+    conductor_pid: u32,
+    state: std::sync::Arc<crate::commands::AppState>,
+    app_handle: tauri::AppHandle,
+) {
+    tauri::async_runtime::spawn(async move {
+        let pid = conductor_pid as i32;
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(3)).await;
+
+            // Check if process is still alive via kill(pid, 0)
+            let alive = unsafe { libc::kill(pid, 0) } == 0;
+            if !alive {
+                let current = state.conductor_status.lock().unwrap().clone();
+                // Only report if we were in Ready state (not already Error/Stopped)
+                if matches!(current, ConductorStatus::Ready { .. }) {
+                    log::error!("Conductor process (pid {}) exited unexpectedly", pid);
+                    let err_status = ConductorStatus::Error {
+                        message: "The Holochain conductor stopped unexpectedly. Restart the app to reconnect.".into(),
+                    };
+                    *state.conductor_status.lock().unwrap() = err_status.clone();
+                    let _ = app_handle.emit("conductor-status", err_status);
+                }
+                break;
+            }
+        }
+    });
 }
