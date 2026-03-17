@@ -316,6 +316,27 @@ These files work for **any** Holochain + Tauri app with zero or minimal changes:
 
 ---
 
+## Network Infrastructure (Bootstrap & Signaling)
+
+Holochain apps need a **bootstrap server** for peer discovery and a **signaling server** for NAT traversal. Both are handled by the same binary (`kitsune2-bootstrap-srv`).
+
+**Default (development):** ProofPoll ships pointing at Holochain's public test server:
+
+```rust
+// src-tauri/src/conductor.rs
+const BOOTSTRAP_URL: &str = "https://dev-test-bootstrap2.holochain.org/";
+const SIGNAL_URL: &str = "wss://dev-test-bootstrap2.holochain.org/";
+```
+
+This is fine for development and testing, but **for production you must run your own bootstrap server**. The public test server has no uptime guarantees and may be reset at any time.
+
+**Running your own:** See the official Holochain guide:
+[Running Network Infrastructure](https://developer.holochain.org/resources/howtos/running-network-infrastructure/)
+
+Then update `BOOTSTRAP_URL` and `SIGNAL_URL` in `src-tauri/src/conductor.rs` to point to your server.
+
+---
+
 ## Project Structure
 
 ```
