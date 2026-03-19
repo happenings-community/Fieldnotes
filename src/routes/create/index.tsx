@@ -10,14 +10,18 @@ export default component$(() => {
   const description = useSignal("");
   const options = useSignal<string[]>(["", ""]);
   const closesAt = useSignal("");
+  const minDateTime = useSignal("");
+  const noExpiry = useSignal(false);
   const submitting = useSignal(false);
+  const error = useSignal<string | null>(null);
 
   useVisibleTask$(() => {
+    const now = new Date();
+    minDateTime.value = now.toISOString().slice(0, 16);
     // Default to 2 days from now
     const twoDays = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
     closesAt.value = twoDays.toISOString().slice(0, 16);
   });
-  const error = useSignal<string | null>(null);
 
   const addOption = $(() => {
     if (options.value.length < 10) {
@@ -55,7 +59,11 @@ export default component$(() => {
     }
 
     let closesAtTs: number | null = null;
-    if (closesAt.value) {
+    if (!noExpiry.value) {
+      if (!closesAt.value) {
+        error.value = "Set a closing time or check 'No expiry'";
+        return;
+      }
       closesAtTs = Math.floor(new Date(closesAt.value).getTime() / 1000);
       if (closesAtTs <= Math.floor(Date.now() / 1000)) {
         error.value = "Closing time must be in the future";
@@ -66,14 +74,12 @@ export default component$(() => {
     submitting.value = true;
 
     try {
-
       const hash = await createPoll({
         title: trimmedTitle,
         description: description.value.trim(),
         options: trimmedOptions,
         closes_at: closesAtTs,
       });
-
 
       await nav(`/poll/${hash}/`);
     } catch (e: any) {
@@ -185,15 +191,28 @@ export default component$(() => {
           <label class="block text-sm font-medium text-gray-300 mb-1">
             Closes at
           </label>
-          <input
-            type="datetime-local"
-            value={closesAt.value}
-            onInput$={(e) =>
-              (closesAt.value = (e.target as HTMLInputElement).value)
-            }
-            class="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
-          />
-          <p class="text-xs text-gray-500 mt-1">Clear to create a poll with no expiry.</p>
+          {!noExpiry.value && (
+            <input
+              type="datetime-local"
+              value={closesAt.value}
+              min={minDateTime.value}
+              onInput$={(e) =>
+                (closesAt.value = (e.target as HTMLInputElement).value)
+              }
+              class="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
+            />
+          )}
+          <label class="flex items-center gap-2 mt-2 cursor-pointer w-fit">
+            <input
+              type="checkbox"
+              checked={noExpiry.value}
+              onChange$={(e) =>
+                (noExpiry.value = (e.target as HTMLInputElement).checked)
+              }
+              class="accent-indigo-500"
+            />
+            <span class="text-sm text-gray-400">No expiry</span>
+          </label>
         </div>
 
         <button
