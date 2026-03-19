@@ -362,7 +362,7 @@ export default component$(() => {
                   <p class="mt-2 text-gray-400">
                     Don't have Flowsta Vault?{" "}
                     <a
-                      href="https://flowsta.com"
+                      href="https://flowsta.com/vault"
                       target="_blank"
                       rel="noopener noreferrer"
                       class="text-indigo-400 hover:text-indigo-300 underline"
@@ -409,7 +409,7 @@ export default component$(() => {
             <p class="text-xs text-gray-600 mt-4">
               Flowsta Vault must be running and unlocked on this computer.{" "}
               <a
-                href="https://flowsta.com"
+                href="https://flowsta.com/vault"
                 target="_blank"
                 rel="noopener noreferrer"
                 class="text-indigo-400 hover:text-indigo-300 underline"
