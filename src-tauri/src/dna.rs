@@ -232,12 +232,54 @@ pub async fn setup_app_interface(
                             );
                         }
                         Err(e) => {
-                            // Cell may be disabled (e.g., old v1.0 after migration).
-                            // Skip it — only the active version needs signing credentials.
-                            log::warn!(
-                                "Could not authorize signing for cell in {}: {}. Skipping.",
-                                app.installed_app_id, e
-                            );
+                            let e_str = e.to_string();
+                            if e_str.contains("CellDisabled") {
+                                // Cell is disabled even though the app showed as Enabled —
+                                // this can happen after conductor restarts. Re-enable and retry.
+                                log::warn!(
+                                    "Cell disabled in {}, re-enabling and retrying...",
+                                    app.installed_app_id
+                                );
+                                if let Err(enable_err) = admin_ws
+                                    .enable_app(app.installed_app_id.clone())
+                                    .await
+                                {
+                                    log::warn!(
+                                        "Could not re-enable {}: {}. Signing skipped.",
+                                        app.installed_app_id, enable_err
+                                    );
+                                } else {
+                                    match admin_ws
+                                        .authorize_signing_credentials(
+                                            AuthorizeSigningCredentialsPayload {
+                                                cell_id: cell_id.clone(),
+                                                functions: None,
+                                            },
+                                        )
+                                        .await
+                                    {
+                                        Ok(creds) => {
+                                            signer.add_credentials(cell_id, creds);
+                                            log::info!(
+                                                "Signing credentials authorized for cell in {} (after re-enable)",
+                                                app.installed_app_id
+                                            );
+                                        }
+                                        Err(retry_err) => {
+                                            log::warn!(
+                                                "Still could not authorize signing for cell in {} after re-enable: {}. Skipping.",
+                                                app.installed_app_id, retry_err
+                                            );
+                                        }
+                                    }
+                                }
+                            } else {
+                                // Non-CellDisabled error — log and skip.
+                                log::warn!(
+                                    "Could not authorize signing for cell in {}: {}. Skipping.",
+                                    app.installed_app_id, e
+                                );
+                            }
                         }
                     }
                 }

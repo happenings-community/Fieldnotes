@@ -29,6 +29,7 @@ export default component$(() => {
   const nav = useNavigate();
   const poll = useSignal<Poll | null>(null);
   const pollAuthor = useSignal<string | null>(null);
+  const pollDnaVersion = useSignal<"1.0" | "1.1">("1.1");
   const votes = useSignal<VoteData[]>([]);
   const myAgent = useSignal<string | null>(null);
   const selectedOption = useSignal<number | null>(null);
@@ -133,11 +134,9 @@ export default component$(() => {
       );
       myAgent.value = status.agent_pub_key;
 
-      const [pollResult, votesResult, flagsResult] = await Promise.all([
-        getPoll(pollHash),
-        getPollVotes(pollHash),
-        getPollFlags(pollHash).catch(() => [] as FlagData[]),
-      ]);
+      // Get the poll first so we know which DHT it lives on (dna_version).
+      // Votes and flags depend on dna_version, so they're fetched after.
+      const pollResult = await getPoll(pollHash);
 
       if (!pollResult) {
         error.value = "Poll not found";
@@ -146,6 +145,16 @@ export default component$(() => {
 
       poll.value = pollResult.poll;
       pollAuthor.value = pollResult.author;
+      pollDnaVersion.value = pollResult.dna_version;
+
+      // Fetch votes from the correct cell. Flags only exist on v1.1.
+      const [votesResult, flagsResult] = await Promise.all([
+        getPollVotes(pollHash, pollResult.dna_version),
+        pollResult.dna_version === "1.1"
+          ? getPollFlags(pollHash).catch(() => [] as FlagData[])
+          : Promise.resolve([] as FlagData[]),
+      ]);
+
       votes.value = votesResult;
       flags.value = flagsResult;
 
@@ -175,9 +184,9 @@ export default component$(() => {
     voting.value = true;
 
     try {
-      await castVote(pollHash, selectedOption.value);
+      await castVote(pollHash, selectedOption.value, pollDnaVersion.value);
 
-      const newVotes = await getPollVotes(pollHash);
+      const newVotes = await getPollVotes(pollHash, pollDnaVersion.value);
       votes.value = newVotes;
       hasVoted.value = true;
 
@@ -317,8 +326,8 @@ export default component$(() => {
           )}
         </div>
 
-        {/* Flag / unflag — visible to signed-in users who are NOT the author */}
-        {linked.value && myAgent.value && pollAuthor.value !== myAgent.value && (
+        {/* Flag / unflag — only on v1.1 polls (v1.0 has no Flag entry type) */}
+        {linked.value && myAgent.value && pollAuthor.value !== myAgent.value && pollDnaVersion.value === "1.1" && (
           <div class="mt-3">
             {flagError.value && (
               <div class="text-red-400 text-xs mb-2">{flagError.value}</div>

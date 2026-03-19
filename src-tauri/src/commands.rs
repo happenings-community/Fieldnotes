@@ -33,6 +33,17 @@ use std::sync::Mutex;
 // are required. The frontend never sees these directly — they're decoded
 // in the Tauri commands and returned as response types (below).
 
+/// Used to decode MigratedPoll entries when merging v1.0 and v1.1 poll lists.
+/// Mirrors the MigratedPoll entry type in the v1.1 integrity zome.
+#[derive(serde::Deserialize)]
+struct MigratedPollEntry {
+    old_action_hash: ActionHash,
+    #[allow(dead_code)]
+    new_action_hash: ActionHash,
+    #[allow(dead_code)]
+    migrated_at: i64,
+}
+
 #[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
 pub struct Poll {
     pub title: String,
@@ -74,12 +85,17 @@ pub struct PollListItem {
     pub hash: String,
     pub poll: Poll,
     pub author: String,
+    /// Which DHT this poll lives on: "1.0" (pre-migration) or "1.1" (current).
+    /// The frontend passes this back when voting so the vote goes to the correct cell.
+    pub dna_version: String,
 }
 
 #[derive(serde::Serialize)]
 pub struct PollDetail {
     pub poll: Poll,
     pub author: String,
+    /// Which DHT this poll lives on: "1.0" or "1.1".
+    pub dna_version: String,
 }
 
 #[derive(serde::Serialize, Clone)]
@@ -349,45 +365,127 @@ pub async fn get_poll(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
     action_hash: String,
 ) -> Result<Option<PollDetail>, String> {
-    let client = state.app_client.lock().await;
-    let client = client.as_ref().ok_or("Conductor not ready")?;
+    let hash = ActionHash::try_from(action_hash)
+        .map_err(|e| format!("Invalid action hash: {:?}", e))?;
 
-    let hash =
-        ActionHash::try_from(action_hash).map_err(|e| format!("Invalid action hash: {:?}", e))?;
-    let payload = ExternIO::encode(hash).map_err(|e| e.to_string())?;
-    let result = call_zome(client, POLLS_ZOME, "get_poll", payload).await?;
+    // Try v1.1 first — most polls will be here after users migrate.
+    {
+        let client = state.app_client.lock().await;
+        if let Some(client) = client.as_ref() {
+            let payload = ExternIO::encode(hash.clone()).map_err(|e| e.to_string())?;
+            let result = call_zome(client, POLLS_ZOME, "get_poll", payload).await?;
+            let record: Option<Record> = result.decode().map_err(|e| e.to_string())?;
+            if let Some(record) = record {
+                let poll: Poll = decode_entry(&record)?;
+                return Ok(Some(PollDetail {
+                    poll,
+                    author: record.action().author().to_string(),
+                    dna_version: "1.1".to_string(),
+                }));
+            }
+        }
+    } // v1.1 lock released
 
-    let record: Option<Record> = result.decode().map_err(|e| e.to_string())?;
-    match record {
-        None => Ok(None),
-        Some(record) => {
+    // Fall back to v1.0 — poll author hasn't migrated yet.
+    let client = state.app_client_v1_0.lock().await;
+    if let Some(client) = client.as_ref() {
+        let payload = ExternIO::encode(hash).map_err(|e| e.to_string())?;
+        let result = call_zome(client, POLLS_ZOME, "get_poll", payload).await?;
+        let record: Option<Record> = result.decode().map_err(|e| e.to_string())?;
+        if let Some(record) = record {
             let poll: Poll = decode_entry(&record)?;
-            let author = record.action().author().to_string();
-            Ok(Some(PollDetail { poll, author }))
+            return Ok(Some(PollDetail {
+                poll,
+                author: record.action().author().to_string(),
+                dna_version: "1.0".to_string(),
+            }));
         }
     }
+
+    Ok(None)
 }
 
 #[tauri::command]
 pub async fn get_all_polls(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
 ) -> Result<Vec<PollListItem>, String> {
-    let client = state.app_client.lock().await;
-    let client = client.as_ref().ok_or("Conductor not ready")?;
+    // Phase 1: fetch v1.1 polls and the set of v1.0 hashes already migrated there.
+    // We release the v1.1 lock before acquiring v1.0 to avoid holding both simultaneously.
+    let (mut polls, migrated_v1_0_hashes) = {
+        let client = state.app_client.lock().await;
+        let client = client.as_ref().ok_or("Conductor not ready")?;
 
-    let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
-    let result = call_zome(client, POLLS_ZOME, "get_all_polls", payload).await?;
+        let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
+        let result = call_zome(client, POLLS_ZOME, "get_all_polls", payload).await?;
+        let records: Vec<Record> = result.decode().map_err(|e| e.to_string())?;
 
-    let records: Vec<Record> = result.decode().map_err(|e| e.to_string())?;
-    let mut polls = Vec::new();
-    for record in &records {
-        let poll: Poll = decode_entry(record)?;
-        polls.push(PollListItem {
-            hash: record.action_address().to_string(),
-            poll,
-            author: record.action().author().to_string(),
-        });
-    }
+        let mut items = Vec::new();
+        for record in &records {
+            if let Ok(poll) = decode_entry::<Poll>(record) {
+                items.push(PollListItem {
+                    hash: record.action_address().to_string(),
+                    poll,
+                    author: record.action().author().to_string(),
+                    dna_version: "1.1".to_string(),
+                });
+            }
+        }
+
+        // Fetch migration mappings so we know which v1.0 hashes are already on v1.1.
+        // If this fails (e.g. no mappings yet), we just show everything from both DHTs.
+        let migrated: std::collections::HashSet<String> = {
+            let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
+            match call_zome(client, POLLS_ZOME, "get_all_migration_mappings", payload).await {
+                Ok(r) => {
+                    let mapping_records: Vec<Record> = r.decode().unwrap_or_default();
+                    let mut set = std::collections::HashSet::new();
+                    for rec in &mapping_records {
+                        if let Ok(entry) = decode_entry::<MigratedPollEntry>(rec) {
+                            set.insert(entry.old_action_hash.to_string());
+                        }
+                    }
+                    set
+                }
+                Err(e) => {
+                    log::warn!("Could not fetch migration mappings: {}", e);
+                    std::collections::HashSet::new()
+                }
+            }
+        };
+
+        (items, migrated)
+    }; // v1.1 lock released here
+
+    // Phase 2: fetch v1.0 polls and include only those not yet migrated to v1.1.
+    // During the migration period both DHTs are live — users on v1.0 are still active.
+    {
+        let client = state.app_client_v1_0.lock().await;
+        if let Some(client) = client.as_ref() {
+            let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
+            match call_zome(client, POLLS_ZOME, "get_all_polls", payload).await {
+                Ok(result) => {
+                    let records: Vec<Record> = result.decode().unwrap_or_default();
+                    for record in &records {
+                        let hash = record.action_address().to_string();
+                        // Skip: this poll is already on v1.1 DHT (author migrated it)
+                        if migrated_v1_0_hashes.contains(&hash) {
+                            continue;
+                        }
+                        if let Ok(poll) = decode_entry::<Poll>(record) {
+                            polls.push(PollListItem {
+                                hash,
+                                poll,
+                                author: record.action().author().to_string(),
+                                dna_version: "1.0".to_string(),
+                            });
+                        }
+                    }
+                }
+                Err(e) => log::warn!("Could not fetch v1.0 polls (skipping): {}", e),
+            }
+        }
+    } // v1.0 lock released here
+
     Ok(polls)
 }
 
@@ -413,10 +511,10 @@ pub async fn cast_vote(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
     poll_action_hash: String,
     option_index: u32,
+    // "1.0" or "1.1" — routes the vote to the correct DHT cell.
+    // Obtained from dna_version on PollListItem or PollDetail.
+    dna_version: String,
 ) -> Result<String, String> {
-    let client = state.app_client.lock().await;
-    let client = client.as_ref().ok_or("Conductor not ready")?;
-
     let hash = ActionHash::try_from(poll_action_hash)
         .map_err(|e| format!("Invalid action hash: {:?}", e))?;
     let input = CastVoteInput {
@@ -424,9 +522,20 @@ pub async fn cast_vote(
         option_index,
     };
     let payload = ExternIO::encode(input).map_err(|e| e.to_string())?;
-    let result = call_zome(client, POLLS_ZOME, "cast_vote", payload).await?;
 
-    let action_hash: ActionHash = result.decode().map_err(|e| e.to_string())?;
+    let action_hash: ActionHash = if dna_version == "1.0" {
+        // Vote on a poll that hasn't been migrated yet — write to v1.0 DHT.
+        let client = state.app_client_v1_0.lock().await;
+        let client = client.as_ref().ok_or("v1.0 conductor not available")?;
+        let result = call_zome(client, POLLS_ZOME, "cast_vote", payload).await?;
+        result.decode().map_err(|e| e.to_string())?
+    } else {
+        let client = state.app_client.lock().await;
+        let client = client.as_ref().ok_or("Conductor not ready")?;
+        let result = call_zome(client, POLLS_ZOME, "cast_vote", payload).await?;
+        result.decode().map_err(|e| e.to_string())?
+    };
+
     Ok(action_hash.to_string())
 }
 
@@ -434,16 +543,26 @@ pub async fn cast_vote(
 pub async fn get_poll_votes(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
     poll_action_hash: String,
+    // "1.0" or "1.1" — reads votes from the correct DHT cell.
+    // Obtained from dna_version on PollListItem or PollDetail.
+    dna_version: String,
 ) -> Result<Vec<VoteData>, String> {
-    let client = state.app_client.lock().await;
-    let client = client.as_ref().ok_or("Conductor not ready")?;
-
     let hash = ActionHash::try_from(poll_action_hash)
         .map_err(|e| format!("Invalid action hash: {:?}", e))?;
     let payload = ExternIO::encode(hash).map_err(|e| e.to_string())?;
-    let result = call_zome(client, POLLS_ZOME, "get_poll_votes", payload).await?;
 
-    let records: Vec<Record> = result.decode().map_err(|e| e.to_string())?;
+    let records: Vec<Record> = if dna_version == "1.0" {
+        let client = state.app_client_v1_0.lock().await;
+        let client = client.as_ref().ok_or("v1.0 conductor not available")?;
+        let result = call_zome(client, POLLS_ZOME, "get_poll_votes", payload).await?;
+        result.decode().map_err(|e| e.to_string())?
+    } else {
+        let client = state.app_client.lock().await;
+        let client = client.as_ref().ok_or("Conductor not ready")?;
+        let result = call_zome(client, POLLS_ZOME, "get_poll_votes", payload).await?;
+        result.decode().map_err(|e| e.to_string())?
+    };
+
     let mut votes = Vec::new();
     for record in &records {
         let vote: Vote = decode_entry(record)?;
