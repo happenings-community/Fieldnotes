@@ -61,6 +61,12 @@ pub struct RegisterMigratedPollInput {
 pub fn create_poll(input: CreatePollInput) -> ExternResult<ActionHash> {
     let now = sys_time()?.as_seconds_and_nanos().0;
 
+    if let Some(closes_at) = input.closes_at {
+        if closes_at <= now {
+            return Err(wasm_error!("Poll closing time must be in the future"));
+        }
+    }
+
     let poll = Poll {
         title: input.title,
         description: input.description,

@@ -4,7 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { linkedContext } from "~/lib/context";
 import { getAllPolls, getPollVotes, getPollFlags, getFlagThreshold, type PollListItem } from "~/lib/holochain";
 
-type Filter = "all" | "created" | "voted";
+type Filter = "current" | "archive" | "created" | "voted";
 
 export default component$(() => {
   const linked = useContext(linkedContext);
@@ -13,7 +13,7 @@ export default component$(() => {
   const loadingSlow = useSignal(false);
   const error = useSignal<string | null>(null);
   const showSignIn = useSignal(false);
-  const filter = useSignal<Filter>("all");
+  const filter = useSignal<Filter>("current");
   const myAgent = useSignal<string | null>(null);
   // Set of poll hashes the user has voted in
   const votedPolls = useSignal<Set<string>>(new Set());
@@ -88,10 +88,15 @@ export default component$(() => {
   });
 
   const filteredPolls = useComputed$(() => {
+    const now = Date.now() / 1000;
     let result = polls.value;
 
     // Apply tab filter
-    if (filter.value === "created") {
+    if (filter.value === "current") {
+      result = result.filter((p) => !p.poll.closes_at || p.poll.closes_at > now);
+    } else if (filter.value === "archive") {
+      result = result.filter((p) => p.poll.closes_at && p.poll.closes_at <= now);
+    } else if (filter.value === "created") {
       result = result.filter((p) => p.author === myAgent.value);
     } else if (filter.value === "voted") {
       result = result.filter((p) => votedPolls.value.has(p.hash));
@@ -180,7 +185,7 @@ export default component$(() => {
       {!loading.value && !error.value && polls.value.length > 0 && (
         <div class="flex items-center gap-3 mb-5">
         <div class="flex gap-1 bg-gray-900 rounded-lg p-1 w-fit">
-          {(["all", "created", "voted"] as const).map((f) => (
+          {(["current", "archive", "created", "voted"] as const).map((f) => (
             <button
               key={f}
               type="button"
@@ -196,7 +201,7 @@ export default component$(() => {
                   : "text-gray-400 hover:text-gray-200"
               }`}
             >
-              {f === "all" ? "All" : f === "created" ? "Created" : "Voted"}
+              {f === "current" ? "Current" : f === "archive" ? "Archive" : f === "created" ? "Created" : "Voted"}
             </button>
           ))}
         </div>
@@ -269,17 +274,27 @@ export default component$(() => {
       ) : filteredPolls.value.length === 0 ? (
         <div class="text-center py-16">
           <p class="text-gray-400 text-lg mb-4">
-            {filter.value === "created"
+            {filter.value === "current"
+              ? "No polls are currently open"
+              : filter.value === "archive"
+              ? "No polls have closed yet"
+              : filter.value === "created"
               ? "You haven't created any polls yet"
               : "You haven't voted on any polls yet"}
           </p>
           {linked.value ? (
             <Link
               href={filter.value === "created" ? "/create/" : "/"}
-              onClick$={() => { if (filter.value === "voted") filter.value = "all"; }}
+              onClick$={() => {
+                if (filter.value === "archive" || filter.value === "voted") filter.value = "current";
+              }}
               class="text-indigo-400 hover:text-indigo-300"
             >
-              {filter.value === "created" ? "Create your first poll" : "Browse all polls"}
+              {filter.value === "created"
+                ? "Create your first poll"
+                : filter.value === "current"
+                ? "Create a poll"
+                : "Browse current polls"}
             </Link>
           ) : (
             <button

@@ -1,4 +1,4 @@
-import { component$, useContext, useSignal, $ } from "@builder.io/qwik";
+import { component$, useContext, useSignal, useVisibleTask$, $ } from "@builder.io/qwik";
 import { useNavigate } from "@builder.io/qwik-city";
 import { linkedContext } from "~/lib/context";
 import { createPoll } from "~/lib/holochain";
@@ -11,6 +11,12 @@ export default component$(() => {
   const options = useSignal<string[]>(["", ""]);
   const closesAt = useSignal("");
   const submitting = useSignal(false);
+
+  useVisibleTask$(() => {
+    // Default to 2 days from now
+    const twoDays = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000);
+    closesAt.value = twoDays.toISOString().slice(0, 16);
+  });
   const error = useSignal<string | null>(null);
 
   const addOption = $(() => {
@@ -48,13 +54,18 @@ export default component$(() => {
       return;
     }
 
+    let closesAtTs: number | null = null;
+    if (closesAt.value) {
+      closesAtTs = Math.floor(new Date(closesAt.value).getTime() / 1000);
+      if (closesAtTs <= Math.floor(Date.now() / 1000)) {
+        error.value = "Closing time must be in the future";
+        return;
+      }
+    }
+
     submitting.value = true;
 
     try {
-      let closesAtTs: number | null = null;
-      if (closesAt.value) {
-        closesAtTs = Math.floor(new Date(closesAt.value).getTime() / 1000);
-      }
 
       const hash = await createPoll({
         title: trimmedTitle,
@@ -62,6 +73,7 @@ export default component$(() => {
         options: trimmedOptions,
         closes_at: closesAtTs,
       });
+
 
       await nav(`/poll/${hash}/`);
     } catch (e: any) {
@@ -171,7 +183,7 @@ export default component$(() => {
 
         <div>
           <label class="block text-sm font-medium text-gray-300 mb-1">
-            Closes at (optional)
+            Closes at
           </label>
           <input
             type="datetime-local"
@@ -181,6 +193,7 @@ export default component$(() => {
             }
             class="bg-gray-900 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500"
           />
+          <p class="text-xs text-gray-500 mt-1">Clear to create a poll with no expiry.</p>
         </div>
 
         <button
