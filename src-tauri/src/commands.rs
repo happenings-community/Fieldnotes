@@ -972,23 +972,23 @@ async fn notify_vault_revoke(app_name: &str, app_agent_pub_key: &str) -> Result<
 pub async fn get_export_data(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
 ) -> Result<serde_json::Value, String> {
-    let client = state.app_client.lock().await;
-    let client = client.as_ref().ok_or("Conductor not ready")?;
-
     let my_key = {
         let key = state.agent_pub_key.lock().unwrap();
         key.clone().ok_or("Agent key not available")?
     };
 
-    // Fetch all polls from the DHT
-    let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
-    let result = call_zome(client, POLLS_ZOME, "get_all_polls", payload).await?;
-    let records: Vec<Record> = result.decode().map_err(|e| e.to_string())?;
-
+    // Fetch all polls and votes from the active DHT
     let mut my_polls = Vec::new();
     let mut my_votes = Vec::new();
+    {
+        let client = state.app_client.lock().await;
+        let client = client.as_ref().ok_or("Conductor not ready")?;
 
-    for record in &records {
+        let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
+        let result = call_zome(client, POLLS_ZOME, "get_all_polls", payload).await?;
+        let records: Vec<Record> = result.decode().map_err(|e| e.to_string())?;
+
+        for record in &records {
         let poll: Poll = decode_entry(record)?;
         let hash = record.action_address().to_string();
         let author = record.action().author().to_string();
@@ -1047,6 +1047,78 @@ pub async fn get_export_data(
             }
         }
     }
+    } // app_client lock released
+
+    // Fetch encrypted private data (vote rationales + drafts)
+
+    let agent_bytes = get_agent_ed25519_bytes(&state)?;
+    let mut my_rationales = Vec::new();
+    let mut my_drafts = Vec::new();
+
+    {
+        let client = state.app_client.lock().await;
+        let client = client.as_ref().ok_or("Conductor not ready")?;
+        let lair = state.lair_client.lock().await;
+        let lair = lair.as_ref().ok_or("Lair not connected")?;
+
+        // Fetch vote rationales for each of my votes
+        for vote_json in &my_votes {
+            if let Some(poll_hash) = vote_json.get("poll_hash").and_then(|h| h.as_str()) {
+                // Get all votes for this poll to find mine
+                if let Ok(hash) = ActionHash::try_from(poll_hash.to_string()) {
+                    let payload = ExternIO::encode(hash).map_err(|e| e.to_string())?;
+                    if let Ok(result) = call_zome(client, POLLS_ZOME, "get_poll_votes", payload).await {
+                        let vote_records: Vec<Record> = result.decode().unwrap_or_default();
+                        for vr in &vote_records {
+                            if vr.action().author().to_string() == my_key {
+                                let vote_hash = vr.action_address().clone();
+                                let rat_payload = ExternIO::encode(vote_hash).map_err(|e| e.to_string())?;
+                                if let Ok(rat_result) = call_zome(client, POLLS_ZOME, "get_vote_rationale", rat_payload).await {
+                                    let rat_record: Option<Record> = rat_result.decode().unwrap_or(None);
+                                    if let Some(rec) = rat_record {
+                                        if let Ok(ee) = decode_entry::<EncryptedEntryData>(&rec) {
+                                            let mut nonce = [0u8; 24];
+                                            if ee.nonce.len() == 24 {
+                                                nonce.copy_from_slice(&ee.nonce);
+                                                if let Ok(plaintext) = crate::crypto::decrypt_from_self(lair, agent_bytes, nonce, &ee.cipher).await {
+                                                    if let Ok(text) = String::from_utf8(plaintext) {
+                                                        my_rationales.push(serde_json::json!({
+                                                            "poll_title": vote_json.get("poll_title"),
+                                                            "voted_for": vote_json.get("option_text"),
+                                                            "rationale": text,
+                                                        }));
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        // Fetch and decrypt draft polls
+        let drafts_payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
+        if let Ok(drafts_result) = call_zome(client, POLLS_ZOME, "get_my_drafts", drafts_payload).await {
+            let draft_records: Vec<Record> = drafts_result.decode().unwrap_or_default();
+            for record in &draft_records {
+                if let Ok(ee) = decode_entry::<EncryptedEntryData>(record) {
+                    let mut nonce = [0u8; 24];
+                    if ee.nonce.len() == 24 {
+                        nonce.copy_from_slice(&ee.nonce);
+                        if let Ok(plaintext) = crate::crypto::decrypt_from_self(lair, agent_bytes, nonce, &ee.cipher).await {
+                            if let Ok(draft) = serde_json::from_slice::<serde_json::Value>(&plaintext) {
+                                my_drafts.push(draft);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
 
     // CAL compliance: include cryptographic key access information
     let passphrase = state.passphrase.lock().unwrap().clone();
@@ -1064,15 +1136,21 @@ pub async fn get_export_data(
         None
     };
 
+    let exported_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs();
+
     Ok(serde_json::json!({
-        "_readme": "Your ProofPoll data. Only includes polls you created and votes you cast.",
+        "_readme": concat!(
+            "Your complete ProofPoll data export. Includes polls you created, ",
+            "votes you cast, private vote rationales (decrypted), and draft polls (decrypted). ",
+            "Your cryptographic keys are included for full data portability (CAL compliance).",
+        ),
 
         "format": {
-            "version": 3,
-            "exported_at": std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs(),
+            "version": 4,
+            "exported_at": exported_at,
         },
 
         "you": {
@@ -1080,7 +1158,11 @@ pub async fn get_export_data(
         },
 
         "keys": {
-            "_readme": "Your lair keystore contains the private signing key for your ProofPoll identity. The passphrase unlocks it. To restore: decode lair_keystore_data from base64, save as 'store_file' in a lair directory, and run lair-keystore with the passphrase.",
+            "_readme": concat!(
+                "Your lair keystore contains the private signing key for your ProofPoll identity. ",
+                "The passphrase unlocks it. To restore: decode lair_keystore_data from base64, ",
+                "save as 'store_file' in a lair directory, and run lair-keystore with the passphrase.",
+            ),
             "lair_passphrase": passphrase,
             "lair_keystore_data": lair_keystore_data,
         },
@@ -1093,6 +1175,24 @@ pub async fn get_export_data(
         "votes_cast": {
             "count": my_votes.len(),
             "votes": my_votes,
+        },
+
+        "private_data": {
+            "_readme": concat!(
+                "Your private data, decrypted from encrypted entries on the DHT. ",
+                "On the network, this data is stored as opaque ciphertext that only you can read. ",
+                "This export includes the decrypted plaintext for your records.",
+            ),
+
+            "vote_rationales": {
+                "count": my_rationales.len(),
+                "rationales": my_rationales,
+            },
+
+            "draft_polls": {
+                "count": my_drafts.len(),
+                "drafts": my_drafts,
+            },
         },
     }))
 }
