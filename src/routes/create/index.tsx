@@ -1,5 +1,5 @@
 import { component$, useContext, useSignal, useVisibleTask$, useComputed$, $ } from "@builder.io/qwik";
-import { useNavigate } from "@builder.io/qwik-city";
+import { useNavigate, Link } from "@builder.io/qwik-city";
 import { linkedContext } from "~/lib/context";
 import { createPoll, saveDraftPoll, type PollType } from "~/lib/holochain";
 
@@ -366,7 +366,7 @@ export default component$(() => {
 
         {draftSaved.value && (
           <div class="bg-green-900/20 border border-green-800 text-green-300 px-4 py-2 rounded-lg text-sm">
-            Draft saved! View it on the <a href="/drafts/" class="underline">Drafts page</a>.
+            Draft saved! View it on the <Link href="/drafts/" class="underline">Drafts page</Link>.
           </div>
         )}
 
