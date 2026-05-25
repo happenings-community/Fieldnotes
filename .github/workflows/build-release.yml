@@ -114,7 +114,11 @@ jobs:
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
       APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+      # APPLE_API_KEY_PATH is intentionally NOT exposed at job level —
+      # tauri-action would otherwise pick it up as an env var and try to
+      # pass the base64 contents (rather than a file path) to
+      # `xcrun notarytool --key`, which fails. It's only needed by the
+      # "Set up Apple API key" step below, where it's set step-scoped.
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
       APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
       ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
@@ -208,6 +212,10 @@ jobs:
 
       - name: Set up Apple API key (macOS)
         if: runner.os == 'macOS' && env.APPLE_API_KEY != ''
+        # Step-scoped so APPLE_API_KEY_PATH doesn't leak into later
+        # steps (tauri-action mishandles it — see job-level env note).
+        env:
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
         run: |
           mkdir -p ~/private_keys
           echo -n "$APPLE_API_KEY_PATH" | base64 --decode -o ~/private_keys/AuthKey_${APPLE_API_KEY}.p8
