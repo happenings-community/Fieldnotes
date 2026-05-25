@@ -7,8 +7,10 @@
 //!
 //! This file is reusable infrastructure. The only things you might change:
 //!   - `ADMIN_WS_PORT` (4466) — change if running alongside other Holochain apps
-//!   - `BOOTSTRAP_URL` / `SIGNAL_URL` — change to your own bootstrap server
-//!     for production, or keep the test server for development
+//!   - Bootstrap / signal / relay URLs and the optional auth material — set
+//!     via compile-time env vars (see "Bootstrap configuration" below).
+//!     Defaults connect to the Holochain ecosystem's public dev bootstrap,
+//!     so a fresh fork builds and runs without any Flowsta dependency.
 //!   - The startup sequence calls `install_dnas()` from `dna.rs` — that's
 //!     where your app-specific hApp bundle names are configured
 
@@ -22,11 +24,67 @@ use tauri::Emitter;
 /// Change this if running alongside other Holochain apps.
 pub const ADMIN_WS_PORT: u16 = 4466;
 
-/// Holochain bootstrap/signaling server for peer discovery.
-/// This is the public test server — for production, deploy your own
-/// kitsune2-bootstrap-srv instance and update these URLs.
-const BOOTSTRAP_URL: &str = "https://dev-test-bootstrap2.holochain.org/";
-const SIGNAL_URL: &str = "wss://dev-test-bootstrap2.holochain.org/";
+// ── Bootstrap configuration ────────────────────────────────────────
+//
+// Read at *compile time* from env vars (set in CI for the official
+// release; unset for fork developers, who get the public Holochain dev
+// bootstrap defaults). To override at build time:
+//
+//   PROOFPOLL_BOOTSTRAP_URL=https://your-bootstrap.example.com   \
+//   PROOFPOLL_SIGNAL_URL=wss://your-bootstrap.example.com        \
+//   PROOFPOLL_RELAY_URL=https://your-bootstrap.example.com./     \
+//   PROOFPOLL_AUTH_MATERIAL=<base64url of opaque auth bytes>     \
+//     cargo tauri build
+//
+// `PROOFPOLL_AUTH_MATERIAL` is optional and only set when targeting a
+// bootstrap that requires authentication (e.g. bootstrap.flowsta.com
+// when running with `--authentication-hook-server`). It is sent
+// verbatim by kitsune2_bootstrap_client to `/authenticate`; the
+// returned token is then used on subsequent connections automatically.
+
+/// Default bootstrap URL — the Holochain ecosystem's public dev server.
+/// Override with `PROOFPOLL_BOOTSTRAP_URL` for production.
+const DEFAULT_BOOTSTRAP_URL: &str = "https://dev-test-bootstrap2.holochain.org";
+
+/// Default signal URL — same host as the dev bootstrap.
+const DEFAULT_SIGNAL_URL: &str = "wss://dev-test-bootstrap2.holochain.org";
+
+/// Default Iroh relay URL — the public Iroh-canary relay (matches
+/// Holochain's own NetworkConfig default). Override with
+/// `PROOFPOLL_RELAY_URL` for production.
+const DEFAULT_RELAY_URL: &str = "https://use1-1.relay.n0.iroh-canary.iroh.link./";
+
+/// Treat empty-string env vars as unset — covers the common case of a
+/// fork's CI referencing `${{ secrets.PROOFPOLL_BOOTSTRAP_URL }}` when
+/// the secret isn't configured (GitHub substitutes the empty string),
+/// which would otherwise clobber the default with empty.
+macro_rules! env_or {
+    ($var:literal, $default:expr) => {
+        match option_env!($var) {
+            Some(s) if !s.is_empty() => s,
+            _ => $default,
+        }
+    };
+}
+
+fn bootstrap_url() -> &'static str {
+    env_or!("PROOFPOLL_BOOTSTRAP_URL", DEFAULT_BOOTSTRAP_URL)
+}
+
+fn signal_url() -> &'static str {
+    env_or!("PROOFPOLL_SIGNAL_URL", DEFAULT_SIGNAL_URL)
+}
+
+fn relay_url() -> &'static str {
+    env_or!("PROOFPOLL_RELAY_URL", DEFAULT_RELAY_URL)
+}
+
+fn auth_material() -> Option<&'static str> {
+    match option_env!("PROOFPOLL_AUTH_MATERIAL") {
+        Some(s) if !s.is_empty() => Some(s),
+        _ => None,
+    }
+}
 
 /// Handle to a running conductor + lair-keystore pair.
 pub struct ConductorHandle {
@@ -78,6 +136,14 @@ fn generate_conductor_config(
     std::fs::create_dir_all(conductor_dir)
         .map_err(|e| format!("Failed to create conductor directory: {}", e))?;
 
+    // Conditionally include base64_auth_material_bootstrap. Indented
+    // to match the `network:` block; empty string when no auth material
+    // is configured (the common case for fork developers).
+    let auth_line = match auth_material() {
+        Some(material) => format!("  base64_auth_material_bootstrap: \"{}\"\n", material),
+        None => String::new(),
+    };
+
     let config = format!(
         r#"data_root_path: {data_root}
 keystore:
@@ -91,13 +157,16 @@ admin_interfaces:
 network:
   bootstrap_url: {bootstrap}
   signal_url: {signal}
-db_sync_strategy: Resilient
+  relay_url: {relay}
+{auth_line}db_sync_strategy: Resilient
 "#,
         data_root = conductor_dir.display(),
         admin_port = admin_port,
         lair_url = lair_connection_url,
-        bootstrap = BOOTSTRAP_URL,
-        signal = SIGNAL_URL,
+        bootstrap = bootstrap_url(),
+        signal = signal_url(),
+        relay = relay_url(),
+        auth_line = auth_line,
     );
 
     let config_path = conductor_dir.join("conductor-config.yaml");

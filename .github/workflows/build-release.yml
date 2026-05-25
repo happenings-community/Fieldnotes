@@ -1,0 +1,270 @@
+name: Build Release
+
+# Tag-driven release. Push a `proofpoll-v<version>` tag to build + publish
+# installers for Linux, macOS (Intel + Apple Silicon), and Windows. Tags
+# with a hyphen suffix (e.g. proofpoll-v1.4.0-beta1) are published as
+# pre-releases.
+#
+# ## Bootstrap configuration (production releases)
+#
+# The "official" ProofPoll binary built by this workflow uses
+# bootstrap.flowsta.com. The conductor's bootstrap/signal/relay URLs +
+# optional bootstrap auth material are baked in via the compile-time env
+# vars below, populated from GitHub Actions secrets.
+#
+# **Fork-friendly:** if a fork copies this workflow without setting the
+# secrets, GitHub passes empty strings, and `conductor.rs` falls back to
+# the public Holochain dev bootstrap defaults (see env_or! macro). The
+# fork's release just works against the Holochain ecosystem's free
+# bootstrap. No Flowsta dependency.
+#
+# To target your own bootstrap (or Flowsta's), set in your repo settings:
+#   PROOFPOLL_BOOTSTRAP_URL   e.g. https://bootstrap.flowsta.com
+#   PROOFPOLL_SIGNAL_URL      e.g. wss://bootstrap.flowsta.com
+#   PROOFPOLL_RELAY_URL       e.g. https://bootstrap.flowsta.com./
+#   PROOFPOLL_AUTH_MATERIAL   base64url of opaque auth bytes (only if your
+#                             bootstrap requires --authentication-hook-server)
+#   VITE_FLOWSTA_CLIENT_ID    your dev.flowsta.com client_id (only if you
+#                             want Flowsta OAuth wired in)
+
+on:
+  push:
+    tags:
+      - "proofpoll-v*.*.*"
+
+permissions:
+  contents: write
+
+jobs:
+  create-release:
+    runs-on: ubuntu-latest
+    outputs:
+      release_id: ${{ steps.create-release.outputs.result }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Get version from tag
+        id: version
+        run: echo "version=${GITHUB_REF_NAME#proofpoll-v}" >> $GITHUB_OUTPUT
+
+      - name: Create GitHub Release
+        id: create-release
+        uses: actions/github-script@v8
+        with:
+          script: |
+            const version = "${{ steps.version.outputs.version }}";
+            // Tags like proofpoll-v1.4.0 are stable; -betaN / -rcN are
+            // pre-releases. Marking pre-releases correctly keeps them out
+            // of GitHub's "Latest" slot when published.
+            const isPrerelease = version.includes('-');
+            const body = [
+              `## ProofPoll v${version}`,
+              '',
+              'Verified polls with Flowsta identity linking. Open source,',
+              'fork-friendly Holochain app on the [Flowsta SDK](https://www.npmjs.com/package/@flowsta/holochain).',
+              '',
+              '### Downloads',
+              'See assets below for platform-specific installers.',
+            ].join('\n');
+            const { data } = await github.rest.repos.createRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              tag_name: context.ref.replace('refs/tags/', ''),
+              name: `ProofPoll v${version}`,
+              body,
+              draft: true,
+              prerelease: isPrerelease,
+            });
+            return data.id;
+
+  build:
+    needs: create-release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - platform: macos-latest
+            target: aarch64-apple-darwin
+          - platform: macos-latest
+            target: x86_64-apple-darwin
+          # Pinned to windows-2022 (VS 2022) — matches Vault's pin; newer
+          # windows-latest images may break aws-lc-sys 0.33.x compilation.
+          - platform: windows-2022
+            target: x86_64-pc-windows-msvc
+
+    runs-on: ${{ matrix.platform }}
+
+    # Compile-time env vars consumed by src-tauri/src/conductor.rs.
+    # Empty when the corresponding secret isn't set → conductor.rs falls
+    # back to its defaults (Holochain dev bootstrap, no auth). See the
+    # workflow header for the fork-friendly rationale.
+    env:
+      PROOFPOLL_BOOTSTRAP_URL: ${{ secrets.PROOFPOLL_BOOTSTRAP_URL }}
+      PROOFPOLL_SIGNAL_URL: ${{ secrets.PROOFPOLL_SIGNAL_URL }}
+      PROOFPOLL_RELAY_URL: ${{ secrets.PROOFPOLL_RELAY_URL }}
+      PROOFPOLL_AUTH_MATERIAL: ${{ secrets.PROOFPOLL_AUTH_MATERIAL }}
+      VITE_FLOWSTA_CLIENT_ID: ${{ secrets.VITE_FLOWSTA_CLIENT_ID }}
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Install system dependencies (Linux)
+        if: matrix.platform == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libgtk-3-dev \
+            libwebkit2gtk-4.1-dev \
+            libappindicator3-dev \
+            librsvg2-dev \
+            patchelf
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: 20
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.target }}
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+          cache-on-failure: true
+
+      # Bundled conductor + keystore: download the official Holochain 0.6.1
+      # release binaries instead of `cargo install` from source. These are
+      # the exact artifacts the production conductors run; skipping the
+      # from-source compile cuts the build by roughly an hour. Holochain
+      # publishes binaries for all four target triples; lair-keystore ships
+      # in the same release (the 0.6.3 lair that 0.6.1 pins).
+      - name: Fetch Holochain 0.6.1 binaries (Unix)
+        if: runner.os != 'Windows'
+        env:
+          HC_RELEASE: holochain-0.6.1
+        run: |
+          mkdir -p src-tauri/binaries
+          base="https://github.com/holochain/holochain/releases/download/${HC_RELEASE}"
+          for bin in holochain lair-keystore; do
+            dest="src-tauri/binaries/${bin}-${{ matrix.target }}"
+            curl -fsSL "${base}/${bin}-${{ matrix.target }}" -o "$dest"
+            chmod +x "$dest"
+            test "$(wc -c < "$dest")" -gt 1000000 || { echo "$bin download too small"; exit 1; }
+          done
+
+      - name: Fetch Holochain 0.6.1 binaries (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          HC_RELEASE: holochain-0.6.1
+        run: |
+          New-Item -ItemType Directory -Force -Path src-tauri/binaries
+          $base = "https://github.com/holochain/holochain/releases/download/$env:HC_RELEASE"
+          $t = "${{ matrix.target }}"
+          foreach ($bin in "holochain","lair-keystore") {
+            $dest = "src-tauri/binaries/$bin-$t.exe"
+            Invoke-WebRequest "$base/$bin-$t.exe" -OutFile $dest
+            if ((Get-Item $dest).Length -lt 1000000) { throw "$bin download too small" }
+          }
+
+      - name: Install frontend dependencies
+        run: npm install
+
+      # Pre-release tags (e.g. proofpoll-v1.4.0-beta1) skip the MSI bundle
+      # on Windows: the MSI bundler rejects non-numeric pre-release
+      # identifiers. NSIS has no such restriction.
+      - name: Compute Tauri bundle args
+        id: tauri_args
+        shell: bash
+        run: |
+          EXTRA=""
+          VERSION="${GITHUB_REF_NAME#proofpoll-v}"
+          if [[ "$RUNNER_OS" == "Windows" ]] && [[ "$VERSION" == *-* ]]; then
+            EXTRA=" --bundles nsis"
+            echo "Pre-release detected ($VERSION) — skipping MSI bundle on Windows"
+          fi
+          echo "extra=$EXTRA" >> "$GITHUB_OUTPUT"
+
+      # v1: unsigned bundles for both macOS and Windows. macOS shows the
+      # "unidentified developer" Gatekeeper warning on first launch;
+      # Windows SmartScreen warns. Acceptable for early ProofPoll users;
+      # add signing later via the pattern in
+      # build-docs/memory/project_windows_signing_status.md (Vault uses
+      # SSL.com OV + eSigner) and an Apple Developer ID for macOS.
+      - name: Build Tauri app
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          releaseId: ${{ needs.create-release.outputs.release_id }}
+          args: --target ${{ matrix.target }}${{ steps.tauri_args.outputs.extra }}
+
+  publish-release:
+    needs: [create-release, build]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Rename release assets
+        uses: actions/github-script@v8
+        env:
+          release_id: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            const releaseId = process.env.release_id;
+            const { data: assets } = await github.rest.repos.listReleaseAssets({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: releaseId,
+            });
+
+            // Tauri's auto-update tarballs ship without the version in
+            // their filename ("ProofPoll_aarch64.app.tar.gz"); inject it
+            // in the rename so they end up consistent with the .dmg
+            // naming.
+            const version = context.ref.replace('refs/tags/proofpoll-v', '');
+
+            const renames = {
+              '_aarch64.dmg': '-macOS-Apple-Silicon.dmg',
+              '_x64.dmg': '-macOS-Intel.dmg',
+              '_amd64.deb': '-Linux.deb',
+              '-1.x86_64.rpm': '-Linux.rpm',
+              '_x64-setup.exe': '-Windows-Setup.exe',
+              '_x64_en-US.msi': '-Windows.msi',
+              '_aarch64.app.tar.gz': `_${version}-macOS-Apple-Silicon.app.tar.gz`,
+              '_x64.app.tar.gz': `_${version}-macOS-Intel.app.tar.gz`,
+              '_aarch64.app.tar.gz.sig': `_${version}-macOS-Apple-Silicon.app.tar.gz.sig`,
+              '_x64.app.tar.gz.sig': `_${version}-macOS-Intel.app.tar.gz.sig`,
+            };
+
+            for (const asset of assets) {
+              for (const [oldSuffix, newSuffix] of Object.entries(renames)) {
+                if (asset.name.endsWith(oldSuffix)) {
+                  const newName = asset.name.replace(oldSuffix, newSuffix);
+                  console.log(`Renaming: ${asset.name} → ${newName}`);
+                  await github.rest.repos.updateReleaseAsset({
+                    owner: context.repo.owner,
+                    repo: context.repo.repo,
+                    asset_id: asset.id,
+                    name: newName,
+                  });
+                  break;
+                }
+              }
+            }
+
+      - name: Publish release
+        uses: actions/github-script@v8
+        env:
+          release_id: ${{ needs.create-release.outputs.release_id }}
+        with:
+          script: |
+            github.rest.repos.updateRelease({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              release_id: process.env.release_id,
+              draft: false,
+            });

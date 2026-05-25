@@ -19,8 +19,13 @@ ProofPoll is a desktop app (Tauri v2 + Qwik) that runs a local Holochain conduct
 ```bash
 # Prerequisites
 # - Rust + wasm32-unknown-unknown target
-# - holochain + lair-keystore binaries (v0.6.0)
+# - holochain + lair-keystore binaries (v0.6.1) — drop into src-tauri/binaries/
+#     named `holochain-<target-triple>` and `lair-keystore-<target-triple>`.
+#     CI does this automatically from the official Holochain GitHub release;
+#     for local dev, either fetch them yourself or rebuild from source.
 # - hc CLI: cargo install holochain_cli --version 0.6.0
+#     (0.6.0 hc CLI produces bundles the 0.6.1 conductor reads — no recompile
+#     needed for the 0.6.0 → 0.6.1 non-breaking upgrade.)
 # - Node.js 18+
 # - flowsta-agent-linking repo cloned at ../flowsta-agent-linking/
 
@@ -410,22 +415,70 @@ These files work for **any** Holochain + Tauri app with zero or minimal changes:
 
 ## Network Infrastructure (Bootstrap & Signaling)
 
-Holochain apps need a **bootstrap server** for peer discovery and a **signaling server** for NAT traversal. Both are handled by the same binary (`kitsune2-bootstrap-srv`).
+Holochain apps need a **bootstrap server** for peer discovery, a **signaling
+server** for NAT traversal, and an **Iroh relay** for connections that NAT
+defeats. As of Holochain 0.6.1 all three are handled by the same binary
+(`kitsune2-bootstrap-srv` ≥ v0.4.1).
 
-**Default (development):** ProofPoll ships pointing at Holochain's public test server:
+The bootstrap / signal / relay URLs and an optional bootstrap auth
+material are read **at compile time** from env vars by
+[`src-tauri/src/conductor.rs`](src-tauri/src/conductor.rs) — set them
+before `cargo tauri build` (locally) or as GitHub Actions secrets
+(in CI). Three deployment modes:
 
-```rust
-// src-tauri/src/conductor.rs
-const BOOTSTRAP_URL: &str = "https://dev-test-bootstrap2.holochain.org/";
-const SIGNAL_URL: &str = "wss://dev-test-bootstrap2.holochain.org/";
+### A. Quick start (default, no setup required)
+
+Don't set any env vars. The source defaults take effect:
+
+| Var | Default | Notes |
+|---|---|---|
+| `PROOFPOLL_BOOTSTRAP_URL` | `https://dev-test-bootstrap2.holochain.org` | Holochain's public dev bootstrap. No SLA. |
+| `PROOFPOLL_SIGNAL_URL` | `wss://dev-test-bootstrap2.holochain.org` | Same host. |
+| `PROOFPOLL_RELAY_URL` | `https://use1-1.relay.n0.iroh-canary.iroh.link./` | Iroh's public canary relay. |
+| `PROOFPOLL_AUTH_MATERIAL` | _(unset)_ | No auth (open bootstrap). |
+
+`cargo tauri dev` and casual experimentation work out of the box.
+
+### B. Self-hosted bootstrap
+
+Run your own `kitsune2-bootstrap-srv` (see the official Holochain guide:
+[Running Network Infrastructure](https://developer.holochain.org/resources/howtos/running-network-infrastructure/))
+and set:
+
+```bash
+PROOFPOLL_BOOTSTRAP_URL=https://your-bootstrap.example.com  \
+PROOFPOLL_SIGNAL_URL=wss://your-bootstrap.example.com       \
+PROOFPOLL_RELAY_URL=https://your-bootstrap.example.com./    \
+  cargo tauri build
 ```
 
-This is fine for development and testing, but **for production you must run your own bootstrap server**. The public test server has no uptime guarantees and may be reset at any time.
+The trailing-dot+slash on `relay_url` (`./`) is required canonical form.
 
-**Running your own:** See the official Holochain guide:
-[Running Network Infrastructure](https://developer.holochain.org/resources/howtos/running-network-infrastructure/)
+### C. Flowsta-hosted bootstrap (what the official ProofPoll binary uses)
 
-Then update `BOOTSTRAP_URL` and `SIGNAL_URL` in `src-tauri/src/conductor.rs` to point to your server.
+Once Flowsta opens bootstrap-as-a-service, register your app at
+<https://dev.flowsta.com>, get a `client_id`, then set:
+
+```bash
+PROOFPOLL_BOOTSTRAP_URL=https://bootstrap.flowsta.com                       \
+PROOFPOLL_SIGNAL_URL=wss://bootstrap.flowsta.com                            \
+PROOFPOLL_RELAY_URL=https://bootstrap.flowsta.com./                         \
+PROOFPOLL_AUTH_MATERIAL=<base64url of `{"client_id":"flowsta_app_..."}`>    \
+  cargo tauri build
+```
+
+`PROOFPOLL_AUTH_MATERIAL` is opaque bytes sent verbatim to the
+bootstrap's `/authenticate` endpoint. The kitsune2 client caches the
+returned token and re-auths on 401 automatically. Without the material,
+Flowsta's bootstrap returns 401 and peering fails.
+
+### Notes for CI
+
+The included [`.github/workflows/build-release.yml`](.github/workflows/build-release.yml)
+reads `PROOFPOLL_BOOTSTRAP_URL`, `PROOFPOLL_SIGNAL_URL`,
+`PROOFPOLL_RELAY_URL`, and `PROOFPOLL_AUTH_MATERIAL` from repository
+secrets and exposes them to the build. If none are set (e.g. a fresh
+fork), the release falls back to the development defaults above.
 
 ---
 
