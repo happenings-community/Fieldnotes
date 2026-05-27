@@ -1,6 +1,7 @@
 import { component$, useContext, useSignal, useVisibleTask$, useComputed$, $ } from "@builder.io/qwik";
 import { useNavigate, Link } from "@builder.io/qwik-city";
 import { linkedContext } from "~/lib/context";
+import { setSignInIntent } from "~/lib/signin";
 import { createPoll, saveDraftPoll, type PollType } from "~/lib/holochain";
 
 const MONTHS = ["January","February","March","April","May","June","July","August","September","October","November","December"];
@@ -185,9 +186,16 @@ export default component$(() => {
       <div class="max-w-xl mx-auto text-center py-16">
         <h1 class="text-2xl font-bold mb-4">Create Poll</h1>
         <p class="text-gray-400 mb-6">Sign in with Flowsta to create polls with verified identity.</p>
-        <a href="/identity/?link=true&returnTo=/create/">
+        <button
+          type="button"
+          onClick$={() => {
+            setSignInIntent({ autoLink: true, returnTo: "/create/" });
+            nav("/identity/");
+          }}
+          class="bg-transparent border-0 p-0 cursor-pointer"
+        >
           <img src="/assets/flowsta-signin.svg" alt="Sign in with Flowsta" width={158} height={36} class="hover:opacity-80 transition-opacity mx-auto" />
-        </a>
+        </button>
       </div>
     );
   }

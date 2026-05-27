@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { linkedContext, linkStateContext, displayNameContext, profilePictureContext, type LinkState } from "~/lib/context";
 import { sanitizeImageSrc } from "~/lib/sanitize";
+import { setSignInIntent } from "~/lib/signin";
 import {
   getLinkedAgents,
   getIdentityLink,
@@ -346,7 +347,8 @@ export default component$(() => {
   });
 
   const handleReconnect = $(() => {
-    nav("/identity/?link=true");
+    setSignInIntent({ autoLink: true });
+    nav("/identity/");
   });
 
   const isActive = (path: string) => loc.url.pathname === path;
@@ -402,7 +404,14 @@ export default component$(() => {
         {status.value?.ready &&
           status.value.agent_pub_key &&
           (linkState.value === "unlinked" ? (
-            <a href="/identity/?link=true">
+            <button
+              type="button"
+              onClick$={() => {
+                setSignInIntent({ autoLink: true });
+                nav("/identity/");
+              }}
+              class="bg-transparent border-0 p-0 cursor-pointer"
+            >
               <img
                 src="/assets/flowsta-signin.svg"
                 alt="Sign in with Flowsta"
@@ -410,7 +419,7 @@ export default component$(() => {
                 height={36}
                 class="hover:opacity-80 transition-opacity"
               />
-            </a>
+            </button>
           ) : (
             // linked / offline / mismatch — render the profile chip. In the
             // `mismatch` case it's grayed out with a tooltip; the banner
@@ -598,9 +607,14 @@ export default component$(() => {
             <p class="text-gray-400 text-sm mb-6">
               Sign in with Flowsta to create and vote on polls.
             </p>
-            <a
-              href="/identity/?link=true&returnTo=/create/"
-              class="inline-block"
+            <button
+              type="button"
+              onClick$={() => {
+                setSignInIntent({ autoLink: true, returnTo: "/create/" });
+                showSignIn.value = false;
+                nav("/identity/");
+              }}
+              class="bg-transparent border-0 p-0 cursor-pointer inline-block"
             >
               <img
                 src="/assets/flowsta-signin.svg"
@@ -609,7 +623,7 @@ export default component$(() => {
                 height={36}
                 class="hover:opacity-80 transition-opacity mx-auto"
               />
-            </a>
+            </button>
             <button
               type="button"
               onClick$={() => (showSignIn.value = false)}

@@ -1,5 +1,6 @@
 import { component$, useContext, useSignal, useComputed$, useVisibleTask$, $ } from "@builder.io/qwik";
 import { Link, useNavigate } from "@builder.io/qwik-city";
+import { setSignInIntent } from "~/lib/signin";
 import { invoke } from "@tauri-apps/api/core";
 import { linkedContext } from "~/lib/context";
 import { getAllPolls, getPollVotes, getPollFlags, getFlagThreshold, type PollListItem } from "~/lib/holochain";
@@ -139,9 +140,14 @@ export default component$(() => {
             <p class="text-gray-400 text-sm mb-6">
               Sign in with Flowsta to create and vote on polls.
             </p>
-            <a
-              href="/identity/?link=true&returnTo=/create/"
-              class="inline-block"
+            <button
+              type="button"
+              onClick$={() => {
+                setSignInIntent({ autoLink: true, returnTo: "/create/" });
+                showSignIn.value = false;
+                nav("/identity/");
+              }}
+              class="bg-transparent border-0 p-0 cursor-pointer inline-block"
             >
               <img
                 src="/assets/flowsta-signin.svg"
@@ -150,7 +156,7 @@ export default component$(() => {
                 height={36}
                 class="hover:opacity-80 transition-opacity mx-auto"
               />
-            </a>
+            </button>
             <button
               type="button"
               onClick$={() => (showSignIn.value = false)}

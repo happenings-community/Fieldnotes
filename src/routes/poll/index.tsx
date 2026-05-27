@@ -12,6 +12,7 @@ import { useNavigate } from "@builder.io/qwik-city";
 // browser-only (never sent to the server-shaped asset resolver), and
 // switching polls is just a hash change.
 import { linkedContext } from "~/lib/context";
+import { setSignInIntent } from "~/lib/signin";
 import { invoke } from "@tauri-apps/api/core";
 import {
   getPoll,
@@ -444,7 +445,14 @@ export default component$(() => {
             <p class="text-gray-400 mb-4">
               Sign in with Flowsta to vote on this poll.
             </p>
-            <a href={`/identity/?link=true&returnTo=/poll/%23${pollHashSig.value}`}>
+            <button
+              type="button"
+              onClick$={() => {
+                setSignInIntent({ autoLink: true, returnTo: `/poll/#${pollHashSig.value}` });
+                nav("/identity/");
+              }}
+              class="bg-transparent border-0 p-0 cursor-pointer"
+            >
               <img
                 src="/assets/flowsta-signin.svg"
                 alt="Sign in with Flowsta to vote"
@@ -452,7 +460,7 @@ export default component$(() => {
                 height={36}
                 class="hover:opacity-80 transition-opacity mx-auto"
               />
-            </a>
+            </button>
           </div>
         )
       )}

@@ -1,8 +1,9 @@
 import { component$, useContext, useSignal, useVisibleTask$, $ } from "@builder.io/qwik";
-import { useLocation, useNavigate } from "@builder.io/qwik-city";
+import { useNavigate } from "@builder.io/qwik-city";
 import { invoke } from "@tauri-apps/api/core";
 import { linkedContext, linkStateContext, displayNameContext, profilePictureContext } from "~/lib/context";
 import { sanitizeImageSrc } from "~/lib/sanitize";
+import { readAndClearSignInIntent } from "~/lib/signin";
 import {
   getLinkedAgents,
   commitIdentityLink,
@@ -10,14 +11,12 @@ import {
 } from "~/lib/holochain";
 
 export default component$(() => {
-  const loc = useLocation();
   const nav = useNavigate();
   const linkedCtx = useContext(linkedContext);
   const linkStateCtx = useContext(linkStateContext);
   const displayName = useContext(displayNameContext);
   const profilePicture = useContext(profilePictureContext);
-  const returnTo = loc.url.searchParams.get("returnTo");
-  const safeReturnTo = returnTo && returnTo.startsWith("/") ? returnTo : null;
+  const safeReturnTo = useSignal<string | null>(null);
   const agentKey = useSignal<string | null>(null);
   const linkedVaultKey = useSignal<string | null>(null);
   const loading = useSignal(true);
@@ -25,7 +24,7 @@ export default component$(() => {
   const unlinking = useSignal(false);
   const error = useSignal<string | null>(null);
   const success = useSignal<string | null>(null);
-  const autoLink = useSignal(loc.url.searchParams.get("link") === "true");
+  const autoLink = useSignal(false);
   const showDetails = useSignal(false);
   const confirmUnlink = useSignal(false);
 
@@ -73,6 +72,11 @@ export default component$(() => {
   );
 
   useVisibleTask$(async ({ cleanup }) => {
+    // Pull autoLink + returnTo from sessionStorage (set by the caller
+    // before nav). See ~/lib/signin.ts.
+    const intent = readAndClearSignInIntent();
+    autoLink.value = intent.autoLink;
+    safeReturnTo.value = intent.returnTo;
     try {
       const status = await invoke<{
         agent_pub_key: string | null;
@@ -121,8 +125,9 @@ export default component$(() => {
           linkedCtx.value = true;
           await fetchVaultProfile();
           success.value = "Signed in successfully!";
-          if (safeReturnTo) {
-            setTimeout(() => nav(safeReturnTo), 1000);
+          const target = safeReturnTo.value;
+          if (target) {
+            setTimeout(() => nav(target), 1000);
           }
         }
       } catch (e: any) {
@@ -178,8 +183,9 @@ export default component$(() => {
       linkedCtx.value = true;
       await fetchVaultProfile();
       success.value = "Signed in successfully!";
-      if (safeReturnTo) {
-        setTimeout(() => nav(safeReturnTo), 1000);
+      const target = safeReturnTo.value;
+      if (target) {
+        setTimeout(() => nav(target), 1000);
       }
     } catch (e: any) {
       const msg = e.message || String(e);
