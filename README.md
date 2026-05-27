@@ -124,6 +124,9 @@ These identifiers **must** change or your app will conflict with ProofPoll:
 | Product name | `src-tauri/tauri.conf.json` | `ProofPoll` | `YourApp` |
 | Rust crate name | `src-tauri/Cargo.toml` | `proofpoll` | `yourapp` |
 | npm package name | `package.json` | `proofpoll` | `yourapp` |
+| Bundled sidecars | `src-tauri/tauri.conf.json` (`externalBin`) | `binaries/proofpoll-holochain`, `binaries/proofpoll-lair-keystore` | `binaries/yourapp-holochain`, `binaries/yourapp-lair-keystore` |
+| Sidecar resolver calls | `src-tauri/src/conductor.rs` + `src-tauri/src/lair.rs` | `sidecar_path("proofpoll-…")` | `sidecar_path("yourapp-…")` |
+| CI binary download | `.github/workflows/build-release.yml` | downloads to `binaries/proofpoll-{holochain,lair-keystore}-<triple>` | `binaries/yourapp-{holochain,lair-keystore}-<triple>` |
 | DNA names | `dna/*/workdir/dna.yaml` | `proofpoll_v1_*` | `yourapp_v1_*` |
 | Network seeds | `dna/*/workdir/dna.yaml` | `proofpoll-network-v1.*` | `yourapp-network-v1.*` |
 | hApp names | `dna/*/workdir/happ.yaml` | `proofpoll_v1_*_happ` | `yourapp_v1_*_happ` |
@@ -141,6 +144,8 @@ Then update these Rust constants:
 Update build scripts (`dna/*/build.sh`, `build-all.sh`) — change hApp filenames.
 
 **Critical**: The `network_seed` in `dna.yaml` determines which DHT your app joins. Two apps with the same network seed share a DHT. Always use a unique seed.
+
+**Why the sidecar prefix matters**: Tauri installs `externalBin` contents next to the main executable, which on Linux means `/usr/bin/`. Shipping a sidecar called `lair-keystore` there collides with any other Tauri/Holochain app that ships the same — `dpkg` will refuse to install. Prefixing the bundled binaries with your app name keeps your `.deb` (and `.msi`) installable alongside any other Holochain Tauri app, including Flowsta Vault and unmodified ProofPoll.
 
 ### Step 2: Replace Entry Types
 
