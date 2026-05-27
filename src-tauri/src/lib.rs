@@ -38,19 +38,27 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_shell::init())
         .setup(|app| {
-            if cfg!(debug_assertions) {
-                app.handle().plugin(
-                    tauri_plugin_log::Builder::default()
-                        .level(log::LevelFilter::Info)
-                        .build(),
-                )?;
-            }
-
             let data_dir = app
                 .path()
                 .app_data_dir()
                 .expect("Failed to get app data directory");
             std::fs::create_dir_all(&data_dir).expect("Failed to create data directory");
+
+            // Log to file (and stdout in dev) at INFO level in both dev and
+            // release builds. Release-build silence would make any startup
+            // failure invisible to users (and to us); the cost of a small
+            // rolling log file is worth the diagnosability.
+            app.handle().plugin(
+                tauri_plugin_log::Builder::default()
+                    .level(log::LevelFilter::Info)
+                    .targets([
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
+                            file_name: Some("proofpoll".to_string()),
+                        }),
+                        tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
+                    ])
+                    .build(),
+            )?;
 
             log::info!("ProofPoll starting up...");
             log::info!("Data dir: {:?}", data_dir);
