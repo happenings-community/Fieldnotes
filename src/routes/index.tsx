@@ -122,6 +122,20 @@ export default component$(() => {
     cleanup(() => clearTimeout(timer));
 
     await loadPolls();
+
+    // Silently re-fetch the poll list every 30s so polls created by peers
+    // on other machines show up without the user having to navigate away
+    // and back. We update polls.value directly instead of calling
+    // loadPolls() so the loading skeleton doesn't flash on each tick.
+    const refresh = setInterval(async () => {
+      try {
+        const fresh = await getAllPolls();
+        polls.value = fresh;
+      } catch {
+        // Ignore transient failures — the next tick will retry.
+      }
+    }, 30_000);
+    cleanup(() => clearInterval(refresh));
   });
 
   return (

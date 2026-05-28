@@ -110,6 +110,22 @@ pub fn run() {
                 {
                     Ok(result) => {
                         log::info!("Conductor started, agent: {}", result.agent_key);
+
+                        // The Windows console-hide threads briefly steal focus
+                        // away from the main ProofPoll window when they
+                        // ShowWindow(SW_HIDE) the conhost windows. Re-raise our
+                        // main window after the hide threads have settled
+                        // (their 3 s budget runs in parallel with conductor
+                        // init — by the time we reach this point they're done).
+                        // No-op on non-Windows platforms.
+                        #[cfg(target_os = "windows")]
+                        {
+                            use tauri::Manager;
+                            if let Some(win) = monitor_handle.get_webview_window("main") {
+                                let _ = win.set_focus();
+                            }
+                        }
+
                         let admin_port = result.handle.admin_port;
                         let app_port = result.handle.app_port;
                         let conductor_pid = result.handle.conductor_pid;
