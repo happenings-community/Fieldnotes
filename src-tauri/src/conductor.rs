@@ -35,14 +35,25 @@ pub const ADMIN_WS_PORT: u16 = 4466;
 //   PROOFPOLL_BOOTSTRAP_URL=https://your-bootstrap.example.com   \
 //   PROOFPOLL_SIGNAL_URL=wss://your-bootstrap.example.com        \
 //   PROOFPOLL_RELAY_URL=https://your-bootstrap.example.com./     \
-//   PROOFPOLL_AUTH_MATERIAL=<base64url of opaque auth bytes>     \
+//   PROOFPOLL_AUTH_MATERIAL=<standard base64 of opaque auth bytes>     \
 //     cargo tauri build
 //
 // `PROOFPOLL_AUTH_MATERIAL` is optional and only set when targeting a
 // bootstrap that requires authentication (e.g. bootstrap.flowsta.com
-// when running with `--authentication-hook-server`). It is sent
-// verbatim by kitsune2_bootstrap_client to `/authenticate`; the
-// returned token is then used on subsequent connections automatically.
+// when running with `--authentication-hook-server`). The same value
+// is written into both `base64_auth_material_bootstrap` and
+// `base64_auth_material_relay` in the conductor config — bootstrap
+// and relay are independent auth flows in kitsune2 even when one URL
+// terminates both. It is sent verbatim by kitsune2_bootstrap_client
+// to `/authenticate`; the returned token is then used on subsequent
+// connections automatically.
+//
+// IMPORTANT: encoding is `base64::engine::general_purpose::STANDARD`
+// (standard alphabet `+/`, padding REQUIRED with `=`). NOT
+// `URL_SAFE_NO_PAD` (the Holochain docstring claims that but the
+// decoder is wrong about itself — see BOOTSTRAP_AUTH_PLAN.md).
+// Encode with `base64 -w0` in shell, or `STANDARD.encode(bytes)` in
+// Rust, or `Buffer.from(s).toString('base64')` in Node.
 
 /// Default bootstrap URL — the Holochain ecosystem's public dev server.
 /// Override with `PROOFPOLL_BOOTSTRAP_URL` for production.
@@ -138,11 +149,16 @@ fn generate_conductor_config(
     std::fs::create_dir_all(conductor_dir)
         .map_err(|e| format!("Failed to create conductor directory: {}", e))?;
 
-    // Conditionally include base64_auth_material_bootstrap. Indented
-    // to match the `network:` block; empty string when no auth material
-    // is configured (the common case for fork developers).
+    // Conditionally include base64_auth_material_bootstrap AND
+    // base64_auth_material_relay. Indented to match the `network:`
+    // block; empty string when no auth material is configured (the
+    // common case for fork developers). Same value goes into both
+    // fields — see the module-level comment for why.
     let auth_line = match auth_material() {
-        Some(material) => format!("  base64_auth_material_bootstrap: \"{}\"\n", material),
+        Some(material) => format!(
+            "  base64_auth_material_bootstrap: \"{m}\"\n  base64_auth_material_relay: \"{m}\"\n",
+            m = material,
+        ),
         None => String::new(),
     };
 
