@@ -278,29 +278,33 @@ The Flowsta Vault is a separate desktop app that manages the user's identity. Yo
 - `src-tauri/src/commands.rs` — `get_identity_link`, `get_cached_profile`, `save_profile_cache` commands
 - `src/lib/holochain.ts` — TypeScript wrappers for all identity + profile functions
 
-### Automatic Backups
+### Automatic Backups + Reinstall Recovery
 
-ProofPoll backs up the user's authored data to Flowsta Vault's encrypted local storage every 60 minutes. The backup includes public data (polls, votes), private data (vote rationales, drafts — decrypted), and cryptographic keys (CAL compliance). Users can view, export, and delete their backups from the Vault's **Your Data** page.
+ProofPoll backs up the user's authored data to Flowsta Vault's encrypted local storage every 60 minutes. The backup uses the canonical v1 payload shape (see the [third-party-backup developer guide](https://github.com/WeAreFlowsta/build-docs/blob/main/features/third-party-backup/README.md) in build-docs), so the Vault recognises it and:
 
-- Backups work even when the Vault is locked (after first unlock in the session)
-- Each backup creates a new timestamped snapshot (up to 10 per app, oldest auto-rotated)
-- Only the current user's data is backed up (not the entire DHT)
-- Encrypted entries are decrypted before export so the backup is human-readable
+- Renders per-entry-type counts on the Your Data page ("12 polls, 38 votes").
+- Inlines the plain-English view of each record into the user's Cryptographic Autonomy License data export — the user can take this file to any compatible Holochain app and use it independently.
+
+On a fresh install, when the user signs in with Flowsta and the local source chain is empty, the app offers to restore from the Vault backup. The dispatcher replays each record by calling the matching zome function on the current (v1.3) cell.
+
+**Mechanics:**
+
+- Backups work even when the Vault is locked (after first unlock in the session).
+- Each backup overwrites the "latest" label by default (single live backup; the 10-per-app capacity is there if needed).
+- Only the current user's authored data is backed up (filtered by `action.author == agent_pub_key`).
+- Replayed entries get new action hashes and timestamps (Holochain doesn't support direct source-chain import). Content matches what the user authored.
 
 **Key files:**
-- `src/routes/layout.tsx` — `startAutoBackup()` call with `getData` function
-- `src-tauri/src/commands.rs` — `get_export_data` command (queries and decrypts all user data)
 
-**Keeping backups in sync with your data model:** Every time you add new entry types or zome functions that create user data, update `get_export_data` to include that data in the backup. If you don't, users will have incomplete exports. This applies to both public entries (new content types) and encrypted entries (new private data types). The backup should always reflect everything the user has created.
+- `src/routes/layout.tsx` — `startAutoBackup()` call + the restore-on-first-launch modal.
+- `src-tauri/src/commands.rs` — three Tauri commands at the bottom of the file:
+  - `build_canonical_backup` — builds the canonical payload from zome queries (replaces the legacy `get_export_data`, which is kept deprecated for backwards compat).
+  - `decode_record_for_export` — decodes an entry into plain JSON for the human-readable view.
+  - `restore_record` — re-creates an entry on the current cell during restore.
 
-**Tips for human-readable exports:**
-- Include `_readme` fields at each section explaining what the data is
-- Use human-readable field names (`poll_title`, `voted_for`) not just hashes
-- Group related data together (e.g. `private_data` section for all encrypted content)
-- Include context: a vote rationale is more useful when it shows the poll title and which option was chosen
-- Decrypt all private data — the backup file is already protected by the Vault's own encryption
+**Keeping backups in sync with your data model:** when you add a new entry type to your DNA, add one `match` arm in `decode_record_for_export`, one in `restore_record`, and one in `build_canonical_backup`'s record-collection loop. The plumbing — encryption, storage, the Your Data UI, the CAL export — is provided by Flowsta Vault.
 
-**For forks:** Update `get_export_data` in `commands.rs` to export your own entry types. The `appName` parameter in `layout.tsx` controls how your app appears in the Vault's Your Data page.
+**For forks:** the three commands above are the entire backup surface area you maintain. Replace `Poll` / `Vote` with your own entry types. The `appName` parameter in `layout.tsx` controls how your app appears in the Vault's Your Data page.
 
 ### Constants reference
 
