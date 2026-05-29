@@ -3980,9 +3980,10 @@ dependencies = [
 
 [[package]]
 name = "proofpoll"
-version = "0.2.0-beta18"
+version = "0.2.0-beta19"
 dependencies = [
  "base64 0.22.1",
+ "hex",
  "holochain_client",
  "holochain_types",
  "lair_keystore_api",

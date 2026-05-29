@@ -1,6 +1,6 @@
 [package]
 name = "proofpoll"
-version = "0.2.0-beta18"
+version = "0.2.0-beta19"
 description = "ProofPoll - Verified polls with Flowsta identity linking"
 authors = ["ProofPoll"]
 license = "MIT"
@@ -44,6 +44,10 @@ rmp-serde = "1"
 
 # Base64 for signature decoding
 base64 = "0.22"
+
+# Hex encoding for the unknown-entry-type fallback in decode_record_for_export,
+# so the user still sees *something* in their Vault export per CAL §4.2.1.
+hex = "0.4"
 
 # HTTP client for IPC notifications to Vault
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }

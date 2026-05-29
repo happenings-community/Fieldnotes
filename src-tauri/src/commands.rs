@@ -976,6 +976,13 @@ async fn notify_vault_revoke(app_name: &str, app_agent_pub_key: &str) -> Result<
     Ok(())
 }
 
+/// **DEPRECATED (v0.2.0+).** Replaced by the SDK's `dumpCellStateForBackup`
+/// (which goes through `decode_record_for_export` below). This function is
+/// kept only so the existing `startAutoBackup({ getData })` wiring in
+/// `routes/layout.tsx` keeps working while we transition; once the new
+/// `startAutoBackup({ adminWebsocket, cellIds, decodeRecordForExport })`
+/// signature ships in production this function should be removed.
+///
 /// Export this user's ProofPoll data for Vault auto-backup.
 /// Only includes the user's own data (CAL compliance):
 ///   - Polls they created (with all votes for context)
@@ -1712,4 +1719,256 @@ pub async fn delete_draft(
 /// Parse an action hash string into an ActionHash.
 fn parse_action_hash(s: &str) -> Result<ActionHash, String> {
     ActionHash::try_from(s.to_string()).map_err(|e| format!("Invalid action hash: {:?}", e))
+}
+
+// ── CAL-compliant backup helpers (v0.2.0+) ────────────────────────
+//
+// `decode_record_for_export` decodes an entry by type into plain JSON so the
+// Flowsta Vault can embed a human-readable view of each record in the user's
+// data export — what the Cryptographic Autonomy License (§4.2.1) obliges
+// every Holochain app to provide.
+//
+// `restore_record` is the symmetric path: given a stored entry, dispatch to
+// the appropriate zome function to re-create the entry on the current cell.
+// This is called by the SDK's `restoreFromVault` when the user restores from
+// a backup on a fresh install.
+//
+// Adding a new entry type to ProofPoll means adding ONE `match` arm in each
+// of these functions, mirroring the entry type's existing structs.
+
+use base64::Engine as _;
+
+/// Decode an entry's MessagePack bytes into a human-readable JSON view, used
+/// when the SDK builds a backup for Vault. Each arm uses the existing local
+/// struct (Poll / Vote) so all fields stay in sync with the DNA via serde.
+#[tauri::command]
+pub async fn decode_record_for_export(
+    entry_type: String,
+    entry_bytes_b64: String,
+) -> Result<serde_json::Value, String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&entry_bytes_b64)
+        .map_err(|e| format!("base64 decode: {}", e))?;
+
+    match entry_type.as_str() {
+        "Poll" => {
+            let poll: Poll = rmp_serde::from_slice(&bytes)
+                .map_err(|e| format!("Poll decode: {}", e))?;
+            serde_json::to_value(poll).map_err(|e| e.to_string())
+        }
+        "Vote" => {
+            let vote: Vote = rmp_serde::from_slice(&bytes)
+                .map_err(|e| format!("Vote decode: {}", e))?;
+            serde_json::to_value(vote).map_err(|e| e.to_string())
+        }
+        other => Ok(serde_json::json!({
+            "_warning": format!("Unknown entry type: {}", other),
+            "raw_bytes_hex": hex::encode(&bytes),
+        })),
+    }
+}
+
+/// Re-create an entry from a backup on the current (v1.3) cell. Called by
+/// the SDK's `restoreFromVault` once per record. Each arm decodes the entry
+/// from the backup's raw bytes, then calls the same zome function the user
+/// would have called originally.
+///
+/// Restored entries are NEW writes — they get new action hashes, new
+/// timestamps, and new signatures, but the content matches what the user
+/// originally authored. CAL §4.2.1 portability is preserved at the content
+/// level (which is what users care about); strict cryptographic-chain
+/// continuity is not a Holochain-supported operation today.
+#[tauri::command]
+pub async fn restore_record(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    entry_type: String,
+    entry_bytes_b64: String,
+) -> Result<(), String> {
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(&entry_bytes_b64)
+        .map_err(|e| format!("base64 decode: {}", e))?;
+
+    let client = state.app_client.lock().await;
+    let client = client.as_ref().ok_or("Conductor not ready")?;
+
+    match entry_type.as_str() {
+        "Poll" => {
+            // Decode the stored entry into the local Poll struct, then build a
+            // CreatePollInput. The local input wraps poll_type as Option<String>
+            // (for migrating to/from old DNAs); convert via serde.
+            let poll: Poll = rmp_serde::from_slice(&bytes)
+                .map_err(|e| format!("Poll decode: {}", e))?;
+            let poll_type_str = match poll.poll_type {
+                Some(pt) => serde_json::to_value(&pt)
+                    .ok()
+                    .and_then(|v| v.as_str().map(String::from)),
+                None => None,
+            };
+            let input = CreatePollInput {
+                title: poll.title,
+                description: poll.description,
+                options: poll.options,
+                closes_at: poll.closes_at,
+                poll_type: poll_type_str,
+            };
+            let payload = ExternIO::encode(input).map_err(|e| e.to_string())?;
+            call_zome(client, POLLS_ZOME, "create_poll", payload).await?;
+            Ok(())
+        }
+        "Vote" => {
+            let vote: Vote = rmp_serde::from_slice(&bytes)
+                .map_err(|e| format!("Vote decode: {}", e))?;
+            let input = CastVoteInput {
+                poll_action_hash: vote.poll_action_hash,
+                option_index: vote.option_index,
+                display_name: vote.display_name,
+                profile_picture: vote.profile_picture,
+            };
+            let payload = ExternIO::encode(input).map_err(|e| e.to_string())?;
+            call_zome(client, POLLS_ZOME, "cast_vote", payload).await?;
+            Ok(())
+        }
+        other => {
+            log::warn!("Skipping unknown entry type during restore: {}", other);
+            Ok(())
+        }
+    }
+}
+
+/// Build the user's canonical-shape backup payload for Vault.
+///
+/// Replaces `get_export_data` for the Vault auto-backup path. Produces the
+/// same payload shape the SDK's `dumpCellStateForBackup` would produce, so
+/// the Flowsta Vault recognises it as canonical and:
+///   - persists a per-entry-type summary alongside the backup metadata
+///     (rendered as "12 polls, 38 votes" on the Your Data and overview UIs),
+///   - inlines the `human_readable` view of each record into the user's CAL
+///     §4.2.1 data export (full or per-app), and
+///   - leaves the signed `raw_record` inside the encrypted backup.
+///
+/// Architecture note: ProofPoll talks to its conductor over AppWebsocket
+/// (not AdminWebsocket), so we go through zome queries here rather than
+/// `dump_full_state`. End result is the same canonical-shape payload —
+/// the Vault doesn't care how it was built, only that it follows the
+/// canonical shape.
+#[tauri::command]
+pub async fn build_canonical_backup(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+) -> Result<serde_json::Value, String> {
+    let my_key = {
+        let key = state.agent_pub_key.lock().unwrap();
+        key.clone().ok_or("Agent key not available")?
+    };
+
+    let client = state.app_client.lock().await;
+    let client = client.as_ref().ok_or("Conductor not ready")?;
+
+    let mut records: Vec<serde_json::Value> = Vec::new();
+    let mut poll_count = 0usize;
+    let mut vote_count = 0usize;
+
+    // Polls authored by this user.
+    let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
+    let result = call_zome(client, POLLS_ZOME, "get_all_polls", payload).await?;
+    let poll_records: Vec<Record> = result.decode().map_err(|e| e.to_string())?;
+
+    for record in &poll_records {
+        let author = record.action().author().to_string();
+        if author != my_key {
+            continue;
+        }
+        let poll: Poll = match decode_entry(record) {
+            Ok(p) => p,
+            Err(_) => continue,
+        };
+        let action_hash = record.action_address().to_string();
+        let timestamp = record.action().timestamp().as_millis();
+        let entry_bytes = rmp_serde::to_vec(&poll)
+            .map_err(|e| format!("Poll re-encode: {}", e))?;
+        let entry_b64 = base64::engine::general_purpose::STANDARD.encode(&entry_bytes);
+        records.push(serde_json::json!({
+            "entryType": "Poll",
+            "actionHash": action_hash,
+            "createdAtMs": timestamp,
+            "human_readable": serde_json::to_value(&poll)
+                .map_err(|e| format!("Poll JSON: {}", e))?,
+            "raw_record": {
+                "entry_b64": entry_b64,
+                "action_address": record.action_address().to_string(),
+                "action_type": format!("{:?}", record.action().action_type()),
+            },
+        }));
+        poll_count += 1;
+
+        // Votes by this user on this poll.
+        let vote_payload =
+            ExternIO::encode(record.action_address().clone()).map_err(|e| e.to_string())?;
+        if let Ok(vr) = call_zome(client, POLLS_ZOME, "get_poll_votes", vote_payload).await {
+            let vote_records: Vec<Record> = vr.decode().unwrap_or_default();
+            for vrec in &vote_records {
+                let vauthor = vrec.action().author().to_string();
+                if vauthor != my_key {
+                    continue;
+                }
+                let vote: Vote = match decode_entry(vrec) {
+                    Ok(v) => v,
+                    Err(_) => continue,
+                };
+                let vote_hash = vrec.action_address().to_string();
+                let vote_ts = vrec.action().timestamp().as_millis();
+                let entry_bytes = rmp_serde::to_vec(&vote)
+                    .map_err(|e| format!("Vote re-encode: {}", e))?;
+                let entry_b64 = base64::engine::general_purpose::STANDARD.encode(&entry_bytes);
+                records.push(serde_json::json!({
+                    "entryType": "Vote",
+                    "actionHash": vote_hash,
+                    "createdAtMs": vote_ts,
+                    "human_readable": serde_json::to_value(&vote)
+                        .map_err(|e| format!("Vote JSON: {}", e))?,
+                    "raw_record": {
+                        "entry_b64": entry_b64,
+                        "action_address": vrec.action_address().to_string(),
+                        "action_type": format!("{:?}", vrec.action().action_type()),
+                    },
+                }));
+                vote_count += 1;
+            }
+        }
+    }
+
+    let mut counts = serde_json::Map::new();
+    if poll_count > 0 {
+        counts.insert("Poll".to_string(), serde_json::json!(poll_count));
+    }
+    if vote_count > 0 {
+        counts.insert("Vote".to_string(), serde_json::json!(vote_count));
+    }
+    let total_records = poll_count + vote_count;
+
+    Ok(serde_json::json!({
+        "version": 1,
+        "_readme": "Your ProofPoll data, backed up automatically by Flowsta Vault. Encrypted with your device key — only you can read it. Each record below carries a plain-English view of what you authored AND a signed Holochain record for restore.",
+        "license": "Cryptographic Autonomy License v1.0 (CAL-1.0)",
+        "app": {
+            "name": "ProofPoll",
+        },
+        "agent_pub_key": my_key,
+        "exported_at_iso": format!("unix:{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs(),
+        ),
+        "_summary": {
+            "countsByEntryType": counts,
+            "totalRecords": total_records,
+        },
+        "cells": [
+            {
+                "role_name": "polls",
+                "_readme": "Each record below is one thing you did. `human_readable` is the plain-English view of the entry. `raw_record` is the bytes needed to restore it onto another Holochain conductor.",
+                "records": records,
+            }
+        ],
+    }))
 }

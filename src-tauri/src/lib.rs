@@ -233,6 +233,11 @@ pub fn run() {
             commands::get_export_data,
             commands::get_migration_status,
             commands::abandon_pending_votes,
+            // ── CAL-compliant backup helpers (v0.2.0+) ─────────────
+            // See build-docs/current/GENERIC_BACKUP_PLAN.md
+            commands::decode_record_for_export,
+            commands::restore_record,
+            commands::build_canonical_backup,
             // ── Encrypted entries (v1.3) ───────────────────────────
             commands::save_vote_rationale,
             commands::get_vote_rationale,

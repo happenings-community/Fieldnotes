@@ -49,6 +49,17 @@ export default component$(() => {
   const migrationDismissed = useSignal(false);
   const disconnecting = useSignal(false);
 
+  // Vault-restore prompt on fresh install. When the user signs in with
+  // Flowsta and the local source chain is empty AND Vault has a backup
+  // for this client_id, we offer to restore. See B5 of the GENERIC_BACKUP_PLAN.
+  const restorePrompt = useSignal<{
+    label: string | null;
+    createdAt: number;
+    sizeBytes: number;
+    summary: { counts_by_entry_type: Record<string, number>; total_records: number } | null;
+  } | null>(null);
+  const restoring = useSignal<{ current: number; total: number } | null>(null);
+
   useVisibleTask$(({ cleanup }) => {
     let active = true;
     let stopAutoBackup: (() => void) | null = null;
@@ -68,15 +79,76 @@ export default component$(() => {
       unlistenStatus = unlisten;
     });
 
+    const checkRestoreNeeded = async () => {
+      // Skip if we've already prompted this session or already running.
+      if (restorePrompt.value || restoring.value) return;
+      try {
+        const sdk = await import("@flowsta/holochain");
+        const backups = await sdk.listVaultBackups({
+          clientId: import.meta.env.VITE_FLOWSTA_CLIENT_ID,
+        });
+        if (!backups || backups.appCount === 0) return;
+        // Check if there's a backup specifically for ProofPoll.
+        const ours = backups.apps.find(
+          (a) => a.clientId === import.meta.env.VITE_FLOWSTA_CLIENT_ID,
+        );
+        if (!ours || ours.backupCount === 0) return;
+        // Check if the local source chain has any of this user's polls.
+        const localPolls: { author: string }[] = await invoke("get_all_polls").catch(() => []);
+        const myKey = status.value?.agent_pub_key ?? null;
+        const hasLocal = myKey
+          ? localPolls.some((p) => p.author === myKey)
+          : localPolls.length > 0;
+        if (hasLocal) return;
+        // Empty local state + Vault has a backup — fetch the metadata and
+        // surface the restore prompt.
+        const backup = await sdk.retrieveFromVault({
+          clientId: import.meta.env.VITE_FLOWSTA_CLIENT_ID,
+        });
+        if (!backup) return;
+        const summary =
+          (backup.data as Record<string, unknown> | null)?._summary as
+            | { counts_by_entry_type?: Record<string, number>; total_records?: number; countsByEntryType?: Record<string, number>; totalRecords?: number }
+            | undefined;
+        // Canonical-shape payload uses camelCase; normalise to snake_case for the UI.
+        const normalised = summary
+          ? {
+              counts_by_entry_type:
+                summary.counts_by_entry_type ?? summary.countsByEntryType ?? {},
+              total_records:
+                summary.total_records ?? summary.totalRecords ?? 0,
+            }
+          : null;
+        restorePrompt.value = {
+          label: backup.label ?? null,
+          createdAt: backup.createdAt,
+          sizeBytes: backup.dataSize,
+          summary: normalised,
+        };
+      } catch (e) {
+        console.warn("[ProofPoll] Restore check failed:", (e as Error).message);
+      }
+    };
+
     const startBackup = async () => {
       if (stopAutoBackup) return; // Already running
       try {
+        // Offer to restore from Vault BEFORE starting auto-backup so we
+        // don't immediately overwrite the user's backup with an empty
+        // source chain.
+        await checkRestoreNeeded();
         const { startAutoBackup } = await import("@flowsta/holochain");
+        // Use the canonical-shape payload (v0.2.0+ — see
+        // build-docs/current/GENERIC_BACKUP_PLAN.md). The Rust side queries
+        // the user's polls and votes, builds the canonical payload, returns
+        // it as JSON. Vault recognises the shape and renders per-entry-type
+        // counts in the UI plus inlines human_readable views in CAL §4.2.1
+        // exports — see backup.rs::is_canonical_backup over in flowsta-vault.
         stopAutoBackup = startAutoBackup({
           clientId: import.meta.env.VITE_FLOWSTA_CLIENT_ID,
           appName: "ProofPoll",
           intervalMinutes: 60,
-          getData: () => invoke("get_export_data"),
+          getData: () => invoke("build_canonical_backup"),
           onSuccess: (r) => console.log(`[ProofPoll] Vault backup: ${r.dataSize} bytes`),
           onError: (e) => console.warn("[ProofPoll] Vault backup skipped:", e.message),
         });
@@ -631,6 +703,104 @@ export default component$(() => {
             >
               Cancel
             </button>
+          </div>
+        </div>
+      )}
+
+      {/* Restore-from-Vault prompt (B5). Appears on first launch after
+          sign-in IF the local source chain is empty AND Vault has a backup. */}
+      {restorePrompt.value && !restoring.value && (
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+          <div class="mx-4 max-w-md rounded-lg border border-gray-700 bg-gray-900 p-6 shadow-xl">
+            <h2 class="mb-3 text-lg font-semibold text-white">Restore your data?</h2>
+            <p class="mb-4 text-sm text-gray-300">
+              We found a backup of your ProofPoll data in your Flowsta Vault
+              from {new Date(restorePrompt.value.createdAt * 1000).toLocaleString()}.
+            </p>
+            {restorePrompt.value.summary && restorePrompt.value.summary.total_records > 0 && (
+              <ul class="mb-4 space-y-1 rounded-md bg-gray-800/50 p-3 text-sm text-gray-200">
+                {Object.entries(restorePrompt.value.summary.counts_by_entry_type).map(
+                  ([entryType, count]) => (
+                    <li key={entryType}>
+                      • {count} {entryType.toLowerCase()}
+                      {count !== 1 ? "s" : ""}
+                    </li>
+                  ),
+                )}
+              </ul>
+            )}
+            <p class="mb-5 text-xs italic text-gray-500">
+              Your data is encrypted with your Flowsta device key — only you can
+              read it.
+            </p>
+            <div class="flex items-center justify-between gap-3">
+              <button
+                type="button"
+                onClick$={() => {
+                  restorePrompt.value = null;
+                }}
+                class="rounded px-3 py-2 text-sm font-medium text-gray-400 border border-gray-600 hover:bg-gray-800"
+              >
+                Start fresh
+              </button>
+              <button
+                type="button"
+                onClick$={async () => {
+                  const prompt = restorePrompt.value;
+                  if (!prompt) return;
+                  restoring.value = { current: 0, total: prompt.summary?.total_records ?? 0 };
+                  try {
+                    const { restoreFromVault } = await import("@flowsta/holochain");
+                    const result = await restoreFromVault({
+                      clientId: import.meta.env.VITE_FLOWSTA_CLIENT_ID,
+                      dispatcher: async (record) => {
+                        await invoke("restore_record", {
+                          entryType: record.entryType,
+                          entryBytesB64: record.raw_record?.entry_b64 ?? "",
+                        });
+                      },
+                      onProgress: (current, total) => {
+                        restoring.value = { current, total };
+                      },
+                    });
+                    console.log(
+                      `[ProofPoll] Restore complete: ${result.succeeded}/${result.totalRecords} succeeded`,
+                    );
+                  } catch (e) {
+                    console.error("[ProofPoll] Restore failed:", (e as Error).message);
+                  } finally {
+                    restoring.value = null;
+                    restorePrompt.value = null;
+                  }
+                }}
+                class="rounded bg-amber-500 px-3 py-2 text-sm font-semibold text-black hover:bg-amber-400"
+              >
+                Restore my data
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Restore progress modal */}
+      {restoring.value && (
+        <div class="fixed inset-0 z-50 flex items-center justify-center bg-black/70">
+          <div class="mx-4 max-w-sm rounded-lg border border-gray-700 bg-gray-900 p-6 shadow-xl">
+            <h3 class="mb-3 text-sm font-semibold text-white">Restoring your data…</h3>
+            <div class="mb-2 h-2 w-full rounded-full bg-gray-700">
+              <div
+                class="h-2 rounded-full bg-amber-400 transition-all"
+                style={{
+                  width:
+                    restoring.value.total > 0
+                      ? `${Math.round((restoring.value.current / restoring.value.total) * 100)}%`
+                      : "0%",
+                }}
+              />
+            </div>
+            <p class="text-xs text-gray-500">
+              {restoring.value.current} of {restoring.value.total}
+            </p>
           </div>
         </div>
       )}
