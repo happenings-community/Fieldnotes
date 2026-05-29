@@ -6,11 +6,22 @@ ProofPoll is a desktop app (Tauri v2 + Qwik) that runs a local Holochain conduct
 
 **This app is designed to be forked.** Change the entry types, swap polls for reviews or proposals, add your own features — the architecture (conductor management, identity linking, DNA migration, encrypted private data) works for any Holochain app. See [Forking Guide](#forking-guide) below.
 
+## Documentation
+
+ProofPoll is the live reference implementation of every Flowsta-on-Holochain integration pattern. The authoritative cross-app docs (and the up-to-date version of every link below) live at **[docs.flowsta.com](https://docs.flowsta.com)**. Useful starting points whether you're a human or an AI assistant:
+
+- **[Building Holochain Apps with Flowsta](https://docs.flowsta.com/vault/holochain-apps)** — the full integration guide this README implements.
+- **[For Holochain Developers](https://docs.flowsta.com/holochain/for-developers)** — the three integration options (OAuth-only, agent linking + Vault, Tauri Vault auth) and what you get with each.
+- **[@flowsta/holochain SDK reference](https://docs.flowsta.com/sdk/holochain)** — every function ProofPoll calls into, including the canonical-shape backup pipeline + `restoreFromVault`.
+- **[Vault IPC reference](https://docs.flowsta.com/vault/ipc-reference)** — the localhost API; the canonical backup payload shape is documented there.
+
+This README focuses on the *fork mechanics* — what to rename, what to keep, where the seams are. For the *why* and the *recommended patterns*, follow the links above.
+
 ## Stack
 
 - **Frontend**: Qwik, TypeScript, Tailwind CSS
-- **Backend**: Tauri v2 (Rust), Holochain 0.6.0
-- **DNA**: Rust (hdi 0.7.0, hdk 0.6.0)
+- **Backend**: Tauri v2 (Rust), Holochain 0.6.1
+- **DNA**: Rust (hdi 0.7.0, hdk 0.6.0 — non-breaking on the 0.6.1 conductor)
 - **Identity**: Flowsta agent linking via `flowsta-agent-linking` crate
 - **Encryption**: lair xsalsa20poly1305 via `crypto_box_xsalsa_by_sign_pub_key`
 
@@ -182,10 +193,12 @@ Keep the migration functions and encrypted entry functions — they're generic.
 
 **Keep** these as-is (infrastructure):
 - `AppState`, `call_zome()`, `try_reenable_app()`, `friendly_error()`, `decode_entry()`
-- `get_app_status`, `get_export_data` (adapt the data it exports)
+- `get_app_status`
 - Identity link commands (`commit_identity_link`, `get_identity_link`, etc.)
 - Encrypted entry commands (`save_vote_rationale`, `save_draft_poll`, etc. — adapt names)
 - Migration status commands (`get_migration_status`, `abandon_pending_votes`)
+- The three backup commands (`build_canonical_backup`, `decode_record_for_export`, `restore_record`) — each has one `match` arm per entry type; add an arm for every new type you introduce. See [Automatic Backups + Reinstall Recovery](#automatic-backups--reinstall-recovery) below for the full pattern.
+- `get_export_data` is deprecated and only kept for legacy callers — new forks should ignore it.
 
 **Register new commands** in `src-tauri/src/lib.rs` → `invoke_handler(tauri::generate_handler![...])`.
 
@@ -218,6 +231,8 @@ The state file name is auto-generated from `ACTIVE_APP_ID` — no hardcoded stri
 ## Flowsta Integration Points
 
 ProofPoll uses [Flowsta](https://flowsta.com) for decentralized identity verification. If you want to use Flowsta in your fork, keep these as-is and just change the client_id. If you want a different identity system (or none), remove them.
+
+> **For the bigger picture** of what Flowsta gives a Holochain app, read [For Holochain Developers](https://docs.flowsta.com/holochain/for-developers) on docs.flowsta.com first. The short version: agent linking is the foundation, but the same SDK also lights up scope-gated user profile data (display name, username, avatar), encrypted Vault backups, one-click reinstall recovery, document signing via Sign It, and CAL §4.2.1-compliant data export — for ~50 more lines of integration code.
 
 ### Setup
 
@@ -280,10 +295,10 @@ The Flowsta Vault is a separate desktop app that manages the user's identity. Yo
 
 ### Automatic Backups + Reinstall Recovery
 
-ProofPoll backs up the user's authored data to Flowsta Vault's encrypted local storage every 60 minutes. The backup uses the canonical v1 payload shape (see the [third-party-backup developer guide](https://github.com/WeAreFlowsta/build-docs/blob/main/features/third-party-backup/README.md) in build-docs), so the Vault recognises it and:
+ProofPoll backs up the user's authored data to Flowsta Vault's encrypted local storage every 60 minutes. The backup uses the canonical v1 payload shape — see **[@flowsta/holochain → Backups](https://docs.flowsta.com/sdk/holochain#backups)** on docs.flowsta.com for the full pattern and the **[canonical payload reference](https://docs.flowsta.com/vault/ipc-reference#canonical-backup-payload-v1)** for the on-the-wire schema. Because Vault recognises the shape, it:
 
 - Renders per-entry-type counts on the Your Data page ("12 polls, 38 votes").
-- Inlines the plain-English view of each record into the user's Cryptographic Autonomy License data export — the user can take this file to any compatible Holochain app and use it independently.
+- Inlines the plain-English view of each record into the user's [Cryptographic Autonomy License](https://github.com/holochain/cryptographic-autonomy-license) §4.2.1 data export — the user can take this file to any compatible Holochain app and use it independently.
 
 On a fresh install, when the user signs in with Flowsta and the local source chain is empty, the app offers to restore from the Vault backup. The dispatcher replays each record by calling the matching zome function on the current (v1.3) cell.
 
