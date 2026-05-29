@@ -35,6 +35,26 @@ pub fn start_lair_process(
 
     if is_first_run {
         log::info!("First run: initializing lair-keystore...");
+
+        // Wipe any stale state files left over from a previous install.
+        // Windows uninstallers commonly clear the config file in AppData
+        // but leave the encrypted `store_file` behind — the next install
+        // generates a fresh random passphrase and a fresh config, then
+        // lair-server tries to open the orphaned store_file with the new
+        // passphrase and crashes with `sqlcipher_page_cipher: hmac check
+        // failed`. Removing the known lair-managed files before init
+        // guarantees we're truly starting from a clean slate.
+        for name in &["store_file", "pid_file", "socket"] {
+            let p = lair_dir.join(name);
+            if p.exists() {
+                log::warn!(
+                    "Removing stale lair file from a previous install: {:?}",
+                    p,
+                );
+                let _ = std::fs::remove_file(&p);
+            }
+        }
+
         // Redirect init's stdio to disk so a silent crash leaves a trail.
         // Piped handles that nothing ever drains are functionally /dev/null.
         let init_stdout = open_log_file(lair_dir, "lair-init-stdout.log")?;
