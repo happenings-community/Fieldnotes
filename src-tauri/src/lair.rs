@@ -51,7 +51,12 @@ pub fn start_lair_process(
                     "Removing stale lair file from a previous install: {:?}",
                     p,
                 );
-                let _ = std::fs::remove_file(&p);
+                if let Err(e) = std::fs::remove_file(&p) {
+                    log::error!(
+                        "FAILED to remove stale lair file {:?}: {} — lair-server will likely crash with an hmac error",
+                        p, e,
+                    );
+                }
             }
         }
 

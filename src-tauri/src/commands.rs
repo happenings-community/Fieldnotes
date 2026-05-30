@@ -170,30 +170,47 @@ pub struct AppState {
 impl AppState {
     pub fn new(data_dir: PathBuf) -> Self {
         let passphrase_path = data_dir.join("lair-passphrase");
+        let lair_config_path = data_dir.join("lair").join("lair-keystore-config.yaml");
+        let lair_store_path = data_dir.join("lair").join("store_file");
+        let conductor_dir = data_dir.join("conductor");
+
+        // These three files are encryption-paired: lair-passphrase derives the
+        // crypto key, the config holds matching salts, store_file is encrypted
+        // under them. Either ALL three are present (a working install) or ALL
+        // three are absent (a true fresh install). Any other combination means
+        // an uninstall+reinstall removed some files but not others, leaving
+        // orphaned state encrypted under a passphrase or salts that no longer
+        // exist — every attempt to start lair from that state crashes with
+        // `sqlcipher_page_cipher: hmac check failed`. Detect that mismatch
+        // here and wipe everything for a clean restart.
+        //
+        // Nothing user-recoverable lives in either dir: agent keys are
+        // regenerated every install, and user-authored polls/votes come back
+        // through the Vault backup restore flow on next sign-in.
+        let pp = passphrase_path.exists();
+        let cfg = lair_config_path.exists();
+        let store = lair_store_path.exists();
+        let all_present = pp && cfg && store;
+        let all_absent = !pp && !cfg && !store;
+        if !all_present && !all_absent {
+            log::warn!(
+                "Inconsistent lair state on startup (lair-passphrase={}, config={}, store_file={}). Wiping lair + conductor data dirs to recover.",
+                pp, cfg, store,
+            );
+            let _ = std::fs::remove_file(&passphrase_path);
+            let _ = std::fs::remove_dir_all(data_dir.join("lair"));
+            let _ = std::fs::remove_dir_all(&conductor_dir);
+        }
+
         let passphrase = if passphrase_path.exists() {
             std::fs::read_to_string(&passphrase_path).unwrap_or_else(|_| generate_passphrase())
         } else {
-            // No passphrase on disk — either a true fresh install OR an
-            // uninstall+reinstall where Windows cleared the passphrase file
-            // but left the encrypted lair store_file and conductor databases
-            // behind. The new passphrase we're about to generate can't open
-            // any of that orphaned state, so wipe it now to guarantee a
-            // consistent fresh start. Nothing user-recoverable lives in
-            // either dir — agent keys are regenerated every install and
-            // user-authored polls/votes come back through the Vault backup
-            // restore flow.
-            for sub in &["lair", "conductor"] {
-                let p = data_dir.join(sub);
-                if p.exists() {
-                    log::warn!(
-                        "Wiping orphaned state at {:?} — encrypted under a previous passphrase that no longer exists",
-                        p,
-                    );
-                    let _ = std::fs::remove_dir_all(&p);
-                }
-            }
             let p = generate_passphrase();
-            let _ = std::fs::write(&passphrase_path, &p);
+            if let Err(e) = std::fs::write(&passphrase_path, &p) {
+                log::error!("Failed to persist lair passphrase to {:?}: {} — next launch will regenerate and wipe state", passphrase_path, e);
+            } else {
+                log::info!("Generated new lair passphrase at {:?}", passphrase_path);
+            }
             p
         };
 
