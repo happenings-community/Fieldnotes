@@ -1299,24 +1299,23 @@ pub async fn get_export_data(
     }))
 }
 
-/// Core lookup: every agent the agent-linking zome reports as linked to
-/// `agent_pub_key`. Shared by `get_linked_agents` (single-key query) and
-/// `get_my_agent_set` (the full identity set). Locks the app client itself, so
-/// callers must NOT already hold that lock.
-async fn linked_agents_for(
+/// Core lookup: the agents the agent-linking zome reports as directly linked
+/// to `agent` (an already-parsed key). Returns `AgentPubKey`s, NOT strings, so
+/// callers can chain hops without round-tripping through the string form —
+/// which matters because the Flowsta Vault's agent key fails holo_hash's strict
+/// string parser (BadChecksum), even though its raw bytes are a valid key. The
+/// zome hands keys back as valid bytes, so chaining from those always works.
+/// Locks the app client itself; callers must NOT already hold that lock.
+async fn linked_agent_keys(
     state: &std::sync::Arc<AppState>,
-    agent_pub_key: &str,
-) -> Result<Vec<String>, String> {
+    agent: &AgentPubKey,
+) -> Result<Vec<AgentPubKey>, String> {
     let client = state.app_client.lock().await;
     let client = client.as_ref().ok_or("Conductor not ready")?;
 
-    let agent = AgentPubKey::try_from(agent_pub_key.to_string())
-        .map_err(|e| format!("Invalid agent key: {:?}", e))?;
-    let payload = ExternIO::encode(agent).map_err(|e| e.to_string())?;
+    let payload = ExternIO::encode(agent.clone()).map_err(|e| e.to_string())?;
     let result = call_zome(client, AGENT_LINKING_ZOME, "get_linked_agents", payload).await?;
-
-    let agents: Vec<AgentPubKey> = result.decode().map_err(|e| e.to_string())?;
-    Ok(agents.iter().map(|a| a.to_string()).collect())
+    result.decode().map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -1324,9 +1323,13 @@ pub async fn get_linked_agents(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
     agent_pub_key: String,
 ) -> Result<Vec<String>, String> {
-    let out = linked_agents_for(state.inner(), &agent_pub_key).await?;
-    // Diagnostic: surface what the link graph returns so cross-device identity
-    // recognition can be verified from the log rather than assumed.
+    let agent = AgentPubKey::try_from(agent_pub_key.clone())
+        .map_err(|e| format!("Invalid agent key: {:?}", e))?;
+    let out: Vec<String> = linked_agent_keys(state.inner(), &agent)
+        .await?
+        .iter()
+        .map(|a| a.to_string())
+        .collect();
     log::info!(
         "[identity] get_linked_agents({}) -> {} agent(s): {:?}",
         agent_pub_key, out.len(), out,
@@ -1346,41 +1349,55 @@ pub async fn get_linked_agents(
 /// frontend sequence that a poll-fetch failure could skip, and (b) fully
 /// observable in proofpoll.log (webview console logs aren't readable on disk).
 ///
-/// The Vault link comes from the locally-stored identity-link.json, so this
-/// works offline. The sibling agents arrive via DHT gossip, so the set grows
-/// over the first few minutes after launch — callers should re-run it.
+/// Resolved as a 2-hop walk through the link graph: local agent → the Vault
+/// identity hub(s) it's linked to → every agent linked to that hub. We get the
+/// hub key from the zome (valid bytes) rather than parsing the Vault key string
+/// from identity-link.json, because that string fails holo_hash's checksum
+/// parser. Sibling agents arrive via DHT gossip, so the set grows over the
+/// first few minutes after launch — callers should re-run it.
 #[tauri::command]
 pub async fn get_my_agent_set(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
     local_agent: Option<String>,
 ) -> Result<Vec<String>, String> {
-    let mut set: Vec<String> = Vec::new();
-    if let Some(local) = &local_agent {
-        set.push(local.clone());
-    }
+    let local = match local_agent.as_ref().and_then(|s| AgentPubKey::try_from(s.clone()).ok()) {
+        Some(k) => k,
+        None => {
+            log::warn!("[identity] get_my_agent_set: no valid local agent: {:?}", local_agent);
+            return Ok(local_agent.into_iter().collect());
+        }
+    };
 
-    let vault = load_identity_link(&state.data_dir).map(|l| l.vault_agent_pub_key);
+    let mut set: Vec<AgentPubKey> = vec![local.clone()];
 
-    if let Some(vault_key) = &vault {
-        match linked_agents_for(state.inner(), vault_key).await {
-            Ok(siblings) => {
-                for a in siblings {
-                    if !set.contains(&a) {
-                        set.push(a);
+    // Hop 1: which identity hub(s) is this local agent linked to (the Vault).
+    // Hop 2: every agent linked to that hub = all of the user's installs.
+    match linked_agent_keys(state.inner(), &local).await {
+        Ok(hubs) => {
+            for hub in hubs {
+                match linked_agent_keys(state.inner(), &hub).await {
+                    Ok(siblings) => {
+                        for s in siblings {
+                            if !set.contains(&s) {
+                                set.push(s);
+                            }
+                        }
                     }
+                    Err(e) => log::warn!("[identity] get_my_agent_set: hub lookup failed: {}", e),
                 }
             }
-            // Conductor not ready / link not yet gossiped — degrade to the
-            // local agent. The caller re-runs, so this self-heals.
-            Err(e) => log::warn!("[identity] get_my_agent_set: vault lookup failed: {}", e),
         }
+        // Conductor not ready — degrade to the local agent. The caller
+        // re-runs on its interval, so this self-heals as the network comes up.
+        Err(e) => log::warn!("[identity] get_my_agent_set: local lookup failed: {}", e),
     }
 
+    let out: Vec<String> = set.iter().map(|a| a.to_string()).collect();
     log::info!(
-        "[identity] get_my_agent_set: local={:?} vault={:?} -> {} agent(s): {:?}",
-        local_agent, vault, set.len(), set,
+        "[identity] get_my_agent_set: local={:?} -> {} agent(s): {:?}",
+        local_agent, out.len(), out,
     );
-    Ok(set)
+    Ok(out)
 }
 
 // ── Flag types and commands (v1.1 — replace with your moderation system) ──
