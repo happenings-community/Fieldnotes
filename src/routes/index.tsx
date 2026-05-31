@@ -40,7 +40,6 @@ export default component$(() => {
       ]);
       polls.value = allPolls;
       myAgent.value = status.agent_pub_key;
-      myAgentSet.value = await loadMyAgentSet(status.agent_pub_key);
       flagThreshold.value = threshold;
 
       // Load flag counts in background. Flags only exist on v1.1 polls.
@@ -119,25 +118,42 @@ export default component$(() => {
     return result;
   });
 
+  // Refresh "who am I across devices" independently of the poll fetch: a
+  // poll-fetch failure must never skip it (that was the beta26 bug), and the
+  // sibling links arrive via gossip over the first few minutes, so it has to
+  // re-run rather than run once.
+  const refreshAgentSet = $(async () => {
+    try {
+      const status = await invoke<{ agent_pub_key: string | null }>(
+        "get_app_status",
+      );
+      myAgent.value = status.agent_pub_key;
+      myAgentSet.value = await loadMyAgentSet(status.agent_pub_key);
+    } catch {
+      // Conductor not ready — the next tick retries.
+    }
+  });
+
   useVisibleTask$(async ({ cleanup }) => {
     const timer = setTimeout(() => {
       loadingSlow.value = true;
     }, 3000);
     cleanup(() => clearTimeout(timer));
 
-    await loadPolls();
+    await Promise.all([loadPolls(), refreshAgentSet()]);
 
-    // Silently re-fetch the poll list every 30s so polls created by peers
-    // on other machines show up without the user having to navigate away
-    // and back. We update polls.value directly instead of calling
-    // loadPolls() so the loading skeleton doesn't flash on each tick.
+    // Silently re-fetch the poll list AND the identity set every 30s: polls
+    // created by peers on other machines show up, and newly-gossiped sibling
+    // agents join myAgentSet, without the user navigating away and back. We
+    // update polls.value directly instead of calling loadPolls() so the
+    // loading skeleton doesn't flash on each tick.
     const refresh = setInterval(async () => {
       try {
-        const fresh = await getAllPolls();
-        polls.value = fresh;
+        polls.value = await getAllPolls();
       } catch {
         // Ignore transient failures — the next tick will retry.
       }
+      await refreshAgentSet();
     }, 30_000);
     cleanup(() => clearInterval(refresh));
   });

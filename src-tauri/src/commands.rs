@@ -1299,21 +1299,32 @@ pub async fn get_export_data(
     }))
 }
 
-#[tauri::command]
-pub async fn get_linked_agents(
-    state: tauri::State<'_, std::sync::Arc<AppState>>,
-    agent_pub_key: String,
+/// Core lookup: every agent the agent-linking zome reports as linked to
+/// `agent_pub_key`. Shared by `get_linked_agents` (single-key query) and
+/// `get_my_agent_set` (the full identity set). Locks the app client itself, so
+/// callers must NOT already hold that lock.
+async fn linked_agents_for(
+    state: &std::sync::Arc<AppState>,
+    agent_pub_key: &str,
 ) -> Result<Vec<String>, String> {
     let client = state.app_client.lock().await;
     let client = client.as_ref().ok_or("Conductor not ready")?;
 
-    let agent = AgentPubKey::try_from(agent_pub_key.clone())
+    let agent = AgentPubKey::try_from(agent_pub_key.to_string())
         .map_err(|e| format!("Invalid agent key: {:?}", e))?;
     let payload = ExternIO::encode(agent).map_err(|e| e.to_string())?;
     let result = call_zome(client, AGENT_LINKING_ZOME, "get_linked_agents", payload).await?;
 
     let agents: Vec<AgentPubKey> = result.decode().map_err(|e| e.to_string())?;
-    let out: Vec<String> = agents.iter().map(|a| a.to_string()).collect();
+    Ok(agents.iter().map(|a| a.to_string()).collect())
+}
+
+#[tauri::command]
+pub async fn get_linked_agents(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    agent_pub_key: String,
+) -> Result<Vec<String>, String> {
+    let out = linked_agents_for(state.inner(), &agent_pub_key).await?;
     // Diagnostic: surface what the link graph returns so cross-device identity
     // recognition can be verified from the log rather than assumed.
     log::info!(
@@ -1321,6 +1332,55 @@ pub async fn get_linked_agents(
         agent_pub_key, out.len(), out,
     );
     Ok(out)
+}
+
+/// Every Holochain agent key that belongs to THIS user: the local conductor
+/// agent plus every other ProofPoll agent linked to the same Flowsta Vault
+/// identity (i.e. the user's other installs/devices). Used for RECOGNITION
+/// only — "is this poll/vote/flag mine?" — never for mutation (Holochain only
+/// lets the original author edit/delete, so those gates stay bound to the
+/// current local agent).
+///
+/// This lives in Rust rather than being orchestrated from the webview so the
+/// lookup is (a) a single robust round-trip instead of a fragile multi-call
+/// frontend sequence that a poll-fetch failure could skip, and (b) fully
+/// observable in proofpoll.log (webview console logs aren't readable on disk).
+///
+/// The Vault link comes from the locally-stored identity-link.json, so this
+/// works offline. The sibling agents arrive via DHT gossip, so the set grows
+/// over the first few minutes after launch — callers should re-run it.
+#[tauri::command]
+pub async fn get_my_agent_set(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    local_agent: Option<String>,
+) -> Result<Vec<String>, String> {
+    let mut set: Vec<String> = Vec::new();
+    if let Some(local) = &local_agent {
+        set.push(local.clone());
+    }
+
+    let vault = load_identity_link(&state.data_dir).map(|l| l.vault_agent_pub_key);
+
+    if let Some(vault_key) = &vault {
+        match linked_agents_for(state.inner(), vault_key).await {
+            Ok(siblings) => {
+                for a in siblings {
+                    if !set.contains(&a) {
+                        set.push(a);
+                    }
+                }
+            }
+            // Conductor not ready / link not yet gossiped — degrade to the
+            // local agent. The caller re-runs, so this self-heals.
+            Err(e) => log::warn!("[identity] get_my_agent_set: vault lookup failed: {}", e),
+        }
+    }
+
+    log::info!(
+        "[identity] get_my_agent_set: local={:?} vault={:?} -> {} agent(s): {:?}",
+        local_agent, vault, set.len(), set,
+    );
+    Ok(set)
 }
 
 // ── Flag types and commands (v1.1 — replace with your moderation system) ──

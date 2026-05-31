@@ -247,7 +247,7 @@ export default component$(() => {
         // Same state-machine as the initial poll — recompute on every tick.
         // The user could have locked / unlocked Vault, switched accounts,
         // or unlinked from the Vault UI at any moment, and the layout
-        // banner needs to reflect it within the 3s polling cadence.
+        // banner needs to reflect it within the polling cadence.
         const wasLinked = linked.value;
         const dhtLinked = await getLinkedAgents(s.agent_pub_key)
           .then((a) => a.length > 0)
@@ -320,7 +320,7 @@ export default component$(() => {
       } catch {
         // Ignore errors
       }
-    }, 3000);
+    }, 15000);
 
     cleanup(() => {
       active = false;

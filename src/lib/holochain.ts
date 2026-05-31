@@ -191,18 +191,16 @@ export async function getIdentityLink(): Promise<IdentityLinkData | null> {
 export async function loadMyAgentSet(
   localAgent: string | null,
 ): Promise<Set<string>> {
-  const set = new Set<string>();
-  if (localAgent) set.add(localAgent);
   try {
-    const link = await getIdentityLink();
-    if (link?.vault_agent_pub_key) {
-      const siblings = await getLinkedAgents(link.vault_agent_pub_key);
-      for (const a of siblings) set.add(a);
-    }
+    // Single Rust round-trip: local agent ∪ agents linked to our Vault
+    // identity. The whole lookup (and its result) is logged to proofpoll.log
+    // by the `get_my_agent_set` command, so recognition is verifiable.
+    const agents = await invoke<string[]>("get_my_agent_set", { localAgent });
+    return new Set(agents);
   } catch {
-    // Not linked / conductor not ready / offline — local agent only.
+    // Conductor not ready / offline — fall back to the local agent only.
+    return new Set(localAgent ? [localAgent] : []);
   }
-  return set;
 }
 
 export async function revokeIdentityLink(): Promise<void> {

@@ -228,6 +228,7 @@ pub fn run() {
             commands::save_profile_cache,
             commands::commit_identity_link,
             commands::get_linked_agents,
+            commands::get_my_agent_set,
             commands::get_identity_link,
             commands::revoke_identity_link,
             // ── Data export + migration (keep as-is) ──────────────
