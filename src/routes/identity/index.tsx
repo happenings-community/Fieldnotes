@@ -4,6 +4,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { linkedContext, linkStateContext, displayNameContext, profilePictureContext } from "~/lib/context";
 import { sanitizeImageSrc } from "~/lib/sanitize";
 import { readAndClearSignInIntent } from "~/lib/signin";
+import { focusSelf } from "~/lib/window";
 import {
   getLinkedAgents,
   commitIdentityLink,
@@ -135,6 +136,7 @@ export default component$(() => {
           linkedCtx.value = true;
           await fetchVaultProfile();
           success.value = "Signed in successfully!";
+          await focusSelf();
           const target = safeReturnTo.value;
           if (target) {
             setTimeout(() => nav(target), 1000);
@@ -143,7 +145,10 @@ export default component$(() => {
       } catch (e: any) {
         const msg = e.message || String(e);
         if (msg.includes("VaultNotFound") || msg.includes("ECONNREFUSED")) {
-          error.value = "Flowsta Vault is not running. Please start it first.";
+          // Vault isn't running. Best-effort: try to open it for the user.
+          void invoke("launch_vault").catch(() => {});
+          error.value =
+            "Flowsta Vault isn't running — opening it now. Once it's ready, click Sign in with Flowsta again.";
         } else if (msg.includes("VaultLocked")) {
           error.value = "Flowsta Vault is locked. Please unlock it first.";
         } else if (msg.includes("UserDenied") || msg.includes("denied")) {
@@ -193,6 +198,7 @@ export default component$(() => {
       linkedCtx.value = true;
       await fetchVaultProfile();
       success.value = "Signed in successfully!";
+      await focusSelf();
       const target = safeReturnTo.value;
       if (target) {
         setTimeout(() => nav(target), 1000);
@@ -200,7 +206,10 @@ export default component$(() => {
     } catch (e: any) {
       const msg = e.message || String(e);
       if (msg.includes("VaultNotFound") || msg.includes("ECONNREFUSED")) {
-        error.value = "Flowsta Vault is not running. Please start it first.";
+        // Vault isn't running. Best-effort: try to open it for the user.
+        void invoke("launch_vault").catch(() => {});
+        error.value =
+          "Flowsta Vault isn't running — opening it now. Once it's ready, click Sign in with Flowsta again.";
       } else if (msg.includes("VaultLocked")) {
         error.value = "Flowsta Vault is locked. Please unlock it first.";
       } else if (msg.includes("UserDenied") || msg.includes("denied")) {

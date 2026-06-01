@@ -453,6 +453,57 @@ pub fn get_app_status(state: tauri::State<'_, std::sync::Arc<AppState>>) -> AppS
     }
 }
 
+/// Best-effort: open the Flowsta Vault desktop app if it's installed but not
+/// running, so the user doesn't have to go find it during Flowsta sign-in.
+/// Tries the usual install locations per OS; returns an error string if it
+/// can't find/launch it (the UI then just asks the user to open it manually).
+#[tauri::command]
+pub fn launch_vault() -> Result<(), String> {
+    use std::process::Command;
+
+    #[cfg(target_os = "macos")]
+    {
+        Command::new("open")
+            .args(["-a", "Flowsta Vault"])
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("Could not open Flowsta Vault: {e}"))
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        // Packaged installs (.deb/.rpm) put `flowsta-vault` on PATH.
+        Command::new("flowsta-vault")
+            .spawn()
+            .map(|_| ())
+            .map_err(|e| format!("Could not open Flowsta Vault: {e}"))
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // Tauri's NSIS installer puts the app under <install root>/Flowsta Vault.
+        for var in ["LOCALAPPDATA", "ProgramFiles", "ProgramFiles(x86)"] {
+            if let Ok(base) = std::env::var(var) {
+                let path = std::path::Path::new(&base)
+                    .join("Flowsta Vault")
+                    .join("Flowsta Vault.exe");
+                if path.exists() {
+                    return Command::new(&path)
+                        .spawn()
+                        .map(|_| ())
+                        .map_err(|e| format!("Could not open Flowsta Vault: {e}"));
+                }
+            }
+        }
+        Err("Could not find Flowsta Vault. Please open it manually.".into())
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "linux", target_os = "windows")))]
+    {
+        Err("Unsupported platform".into())
+    }
+}
+
 // ── Poll commands (replace with your app's commands) ──────────────────
 //
 // Each command follows the same pattern:

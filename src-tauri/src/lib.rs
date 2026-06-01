@@ -211,6 +211,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             // ── Infrastructure (keep as-is) ───────────────────────
             commands::get_app_status,
+            commands::launch_vault,
             // ── Your app commands (replace these) ─────────────────
             commands::create_poll,
             commands::get_poll,
