@@ -1,5 +1,6 @@
 import { component$, useContext, useSignal, useVisibleTask$, $ } from "@builder.io/qwik";
 import { useNavigate } from "@builder.io/qwik-city";
+import { sanitizeImageSrc } from "~/lib/sanitize";
 
 // Why hash-based instead of /poll/[id]/?
 // The Qwik static adapter only pre-renders routes whose param values
@@ -563,9 +564,9 @@ export default component$(() => {
                     <div class="flex flex-wrap gap-1.5 mt-1">
                       {visibleVoters.map((v) => (
                         <div key={v.author} class="flex items-center gap-1 bg-gray-800 rounded-full px-2 py-0.5">
-                          {v.profile_picture && (
+                          {sanitizeImageSrc(v.profile_picture ?? null) && (
                             <img
-                              src={v.profile_picture}
+                              src={sanitizeImageSrc(v.profile_picture ?? null)!}
                               alt=""
                               width={14}
                               height={14}
