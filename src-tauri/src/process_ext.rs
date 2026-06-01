@@ -111,11 +111,19 @@ mod windows_hide {
     //! after our few-poll budget had already elapsed. Result: terminal
     //! windows reliably appeared after we'd "given up".
     //!
-    //! Now we poll for the full 3 s budget at 50 ms intervals and call
-    //! `ShowWindow(SW_HIDE)` on every match every iteration regardless of
-    //! current visibility. `SW_HIDE` is idempotent on already-hidden
-    //! windows, so the worst case is a 50 ms visibility flicker between
-    //! the OS toggling `WS_VISIBLE` on and our next poll catching it.
+    //! Now we poll for a 12 s budget and call `ShowWindow(SW_HIDE)` on every
+    //! match every iteration regardless of current visibility. `SW_HIDE` is
+    //! idempotent on already-hidden windows, so the worst case is a brief
+    //! visibility flicker between the OS toggling `WS_VISIBLE` on and our next
+    //! poll catching it.
+    //!
+    //! The 12 s (not 3 s) budget exists because the lair-keystore children
+    //! pop their console window within ~150 ms, but the **holochain conductor**
+    //! compiles WASM on startup and only shows its console window several
+    //! seconds in — after a 3 s budget had already given up, so the conductor
+    //! window leaked and stayed visible. We poll fast (50 ms) for the first
+    //! 2 s to catch lair with minimal flicker, then back off to 200 ms for the
+    //! long tail so watching for the conductor's late window stays cheap.
     //!
     //! We also log the window class on the first match per pid so we can
     //! verify we're finding the actual `ConsoleWindowClass` window vs.
@@ -301,7 +309,7 @@ mod windows_hide {
     pub(super) fn hide_console_for_pid_async(pid: u32) {
         std::thread::spawn(move || {
             let started = Instant::now();
-            let deadline = started + Duration::from_secs(3);
+            let deadline = started + Duration::from_secs(12);
             log::info!("[hide:{pid}] thread started");
             let mut iter: u32 = 0;
             let mut total_hides: u32 = 0;
@@ -348,7 +356,11 @@ mod windows_hide {
                         started.elapsed().as_millis(),
                     );
                 }
-                std::thread::sleep(Duration::from_millis(50));
+                // Poll fast early (catch lair with minimal flicker), then back
+                // off — the conductor's console window appears several seconds
+                // in, so we keep watching but cheaply for the long tail.
+                let interval = if started.elapsed() < Duration::from_secs(2) { 50 } else { 200 };
+                std::thread::sleep(Duration::from_millis(interval));
             }
             log::info!(
                 "[hide:{pid}] thread exited after {}ms ({} iters, {} hide calls, {} hides-while-visible, direct={}, via-parent={})",

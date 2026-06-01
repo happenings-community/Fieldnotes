@@ -1330,12 +1330,19 @@ pub async fn get_linked_agents(
         .iter()
         .map(|a| a.to_string())
         .collect();
-    log::info!(
+    // Debug, not info: the layout polls this every ~15s, so info would spam
+    // the log. The user-facing identity set is logged (on change) by
+    // get_my_agent_set instead.
+    log::debug!(
         "[identity] get_linked_agents({}) -> {} agent(s): {:?}",
         agent_pub_key, out.len(), out,
     );
     Ok(out)
 }
+
+/// Last set logged by `get_my_agent_set`, so we log only when it changes
+/// (the command runs ~every 30s; logging every call would spam the log).
+static LAST_AGENT_SET: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
 
 /// Every Holochain agent key that belongs to THIS user: the local conductor
 /// agent plus every other ProofPoll agent linked to the same Flowsta Vault
@@ -1392,11 +1399,22 @@ pub async fn get_my_agent_set(
         Err(e) => log::warn!("[identity] get_my_agent_set: local lookup failed: {}", e),
     }
 
-    let out: Vec<String> = set.iter().map(|a| a.to_string()).collect();
-    log::info!(
-        "[identity] get_my_agent_set: local={:?} -> {} agent(s): {:?}",
-        local_agent, out.len(), out,
-    );
+    let mut out: Vec<String> = set.iter().map(|a| a.to_string()).collect();
+    out.sort(); // stable order so change-detection doesn't fire on reordering
+
+    // Log only when the set CHANGES (first resolve, or a new linked agent
+    // gossips in). Keeps the observability that diagnosed the BadChecksum bug
+    // without logging every ~30s tick.
+    {
+        let mut last = LAST_AGENT_SET.lock().unwrap();
+        if last.as_deref() != Some(out.as_slice()) {
+            log::info!(
+                "[identity] get_my_agent_set: local={:?} -> {} agent(s): {:?}",
+                local_agent, out.len(), out,
+            );
+            *last = Some(out.clone());
+        }
+    }
     Ok(out)
 }
 
