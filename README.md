@@ -12,7 +12,7 @@ ProofPoll is the live reference implementation of every Flowsta-on-Holochain int
 
 - **[Building Holochain Apps with Flowsta](https://docs.flowsta.com/vault/holochain-apps)** — the full integration guide this README implements.
 - **[For Holochain Developers](https://docs.flowsta.com/holochain/for-developers)** — the three integration options (OAuth-only, agent linking + Vault, Tauri Vault auth) and what you get with each.
-- **[@flowsta/holochain SDK reference](https://docs.flowsta.com/sdk/holochain)** — every function ProofPoll calls into, including the canonical-shape backup pipeline + `restoreFromVault`.
+- **[@flowsta/holochain SDK reference](https://docs.flowsta.com/sdk/holochain)** — every function ProofPoll calls into, including identity linking, cross-device recognition, and the canonical-shape backup pipeline.
 - **[Vault IPC reference](https://docs.flowsta.com/vault/ipc-reference)** — the localhost API; the canonical backup payload shape is documented there.
 
 This README focuses on the *fork mechanics* — what to rename, what to keep, where the seams are. For the *why* and the *recommended patterns*, follow the links above.
@@ -197,7 +197,7 @@ Keep the migration functions and encrypted entry functions — they're generic.
 - Identity link commands (`commit_identity_link`, `get_identity_link`, etc.)
 - Encrypted entry commands (`save_vote_rationale`, `save_draft_poll`, etc. — adapt names)
 - Migration status commands (`get_migration_status`, `abandon_pending_votes`)
-- The three backup commands (`build_canonical_backup`, `decode_record_for_export`, `restore_record`) — each has one `match` arm per entry type; add an arm for every new type you introduce. See [Automatic Backups + Reinstall Recovery](#automatic-backups--reinstall-recovery) below for the full pattern.
+- The two backup commands (`build_canonical_backup`, `decode_record_for_export`) — each has one `match` arm per entry type; add an arm for every new type you introduce. See [Automatic Backups + Cross-Device Recognition](#automatic-backups--cross-device-recognition) below for the full pattern.
 - `get_export_data` is deprecated and only kept for legacy callers — new forks should ignore it.
 
 **Register new commands** in `src-tauri/src/lib.rs` → `invoke_handler(tauri::generate_handler![...])`.
@@ -232,7 +232,7 @@ The state file name is auto-generated from `ACTIVE_APP_ID` — no hardcoded stri
 
 ProofPoll uses [Flowsta](https://flowsta.com) for decentralized identity verification. If you want to use Flowsta in your fork, keep these as-is and just change the client_id. If you want a different identity system (or none), remove them.
 
-> **For the bigger picture** of what Flowsta gives a Holochain app, read [For Holochain Developers](https://docs.flowsta.com/holochain/for-developers) on docs.flowsta.com first. The short version: agent linking is the foundation, but the same SDK also lights up scope-gated user profile data (display name, username, avatar), encrypted Vault backups, one-click reinstall recovery, document signing via Sign It, and CAL §4.2.1-compliant data export — for ~50 more lines of integration code.
+> **For the bigger picture** of what Flowsta gives a Holochain app, read [For Holochain Developers](https://docs.flowsta.com/holochain/for-developers) on docs.flowsta.com first. The short version: agent linking is the foundation, but the same SDK also lights up scope-gated user profile data (display name, username, avatar), encrypted Vault backups, cross-device recognition, document signing via Sign It, and CAL §4.2.1-compliant data export — for ~50 more lines of integration code.
 
 ### Setup
 
@@ -293,33 +293,33 @@ The Flowsta Vault is a separate desktop app that manages the user's identity. Yo
 - `src-tauri/src/commands.rs` — `get_identity_link`, `get_cached_profile`, `save_profile_cache` commands
 - `src/lib/holochain.ts` — TypeScript wrappers for all identity + profile functions
 
-### Automatic Backups + Reinstall Recovery
+### Automatic Backups + Cross-Device Recognition
 
 ProofPoll backs up the user's authored data to Flowsta Vault's encrypted local storage every 60 minutes. The backup uses the canonical v1 payload shape — see **[@flowsta/holochain → Backups](https://docs.flowsta.com/sdk/holochain#backups)** on docs.flowsta.com for the full pattern and the **[canonical payload reference](https://docs.flowsta.com/vault/ipc-reference#canonical-backup-payload-v1)** for the on-the-wire schema. Because Vault recognises the shape, it:
 
 - Renders per-entry-type counts on the Your Data page ("12 polls, 38 votes").
 - Inlines the plain-English view of each record into the user's [Cryptographic Autonomy License](https://github.com/holochain/cryptographic-autonomy-license) §4.2.1 data export — the user can take this file to any compatible Holochain app and use it independently.
 
-On a fresh install, when the user signs in with Flowsta and the local source chain is empty, the app offers to restore from the Vault backup. The dispatcher replays each record by calling the matching zome function on the current (v1.3) cell.
+**Recovery is recognition, not restore.** On a fresh install or a new machine there is no restore step. When the user signs in with Flowsta, the app resolves their full **linked agent set** — every agent key they've used across devices — with a 2-hop walk through the identity link graph (`get_my_agent_set`). Their polls and votes were never lost: they live on the DHT, authored by those agents, and the app recognises them as the user's own no matter which device created them, re-syncing from the network as the conductor warms up. The Vault backup is the user's portable CAL §4.2.1 export — not the recovery path.
 
 **Mechanics:**
 
 - Backups work even when the Vault is locked (after first unlock in the session).
 - Each backup overwrites the "latest" label by default (single live backup; the 10-per-app capacity is there if needed).
 - Only the current user's authored data is backed up (filtered by `action.author == agent_pub_key`).
-- Replayed entries get new action hashes and timestamps (Holochain doesn't support direct source-chain import). Content matches what the user authored.
+- Recognition is read-only — the app reads entries authored by any agent in the user's set; it never re-writes or imports them, so there are no duplicate records or new action hashes.
 
 **Key files:**
 
-- `src/routes/layout.tsx` — `startAutoBackup()` call + the restore-on-first-launch modal.
-- `src-tauri/src/commands.rs` — three Tauri commands at the bottom of the file:
+- `src/routes/layout.tsx` — the `startAutoBackup()` call.
+- `src-tauri/src/commands.rs` — two backup Tauri commands at the bottom of the file:
   - `build_canonical_backup` — builds the canonical payload from zome queries (replaces the legacy `get_export_data`, which is kept deprecated for backwards compat).
   - `decode_record_for_export` — decodes an entry into plain JSON for the human-readable view.
-  - `restore_record` — re-creates an entry on the current cell during restore.
+- `get_my_agent_set` (`commands.rs`) — resolves the user's cross-device agent set for recognition; used by the read paths in `src/lib/holochain.ts`.
 
-**Keeping backups in sync with your data model:** when you add a new entry type to your DNA, add one `match` arm in `decode_record_for_export`, one in `restore_record`, and one in `build_canonical_backup`'s record-collection loop. The plumbing — encryption, storage, the Your Data UI, the CAL export — is provided by Flowsta Vault.
+**Keeping backups in sync with your data model:** when you add a new entry type to your DNA, add one `match` arm in `decode_record_for_export` and one in `build_canonical_backup`'s record-collection loop. The plumbing — encryption, storage, the Your Data UI, the CAL export — is provided by Flowsta Vault.
 
-**For forks:** the three commands above are the entire backup surface area you maintain. Replace `Poll` / `Vote` with your own entry types. The `appName` parameter in `layout.tsx` controls how your app appears in the Vault's Your Data page.
+**For forks:** the two commands above are the entire backup surface area you maintain. Replace `Poll` / `Vote` with your own entry types. The `appName` parameter in `layout.tsx` controls how your app appears in the Vault's Your Data page.
 
 ### Constants reference
 

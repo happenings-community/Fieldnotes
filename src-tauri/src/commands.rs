@@ -1963,13 +1963,10 @@ fn parse_action_hash(s: &str) -> Result<ActionHash, String> {
 // data export — what the Cryptographic Autonomy License (§4.2.1) obliges
 // every Holochain app to provide.
 //
-// `restore_record` is the symmetric path: given a stored entry, dispatch to
-// the appropriate zome function to re-create the entry on the current cell.
-// This is called by the SDK's `restoreFromVault` when the user restores from
-// a backup on a fresh install.
-//
-// Adding a new entry type to ProofPoll means adding ONE `match` arm in each
-// of these functions, mirroring the entry type's existing structs.
+// Adding a new entry type to ProofPoll means adding ONE `match` arm in
+// `decode_record_for_export` and one in `build_canonical_backup`'s record loop,
+// mirroring the entry type's existing structs. There is no restore command —
+// see the note below on why recovery is recognition, not replay.
 
 use base64::Engine as _;
 
@@ -2003,11 +2000,12 @@ pub async fn decode_record_for_export(
     }
 }
 
-// Note: the old per-entry `restore_record` dispatcher was removed in favour of
-// source-chain `graft_records` (see `recovery.rs` + `conductor.rs`). Graft
-// rebuilds the chain with the original action hashes and signatures preserved
-// — no new writes, no DHT duplicates — which the dispatcher approach could not
-// achieve.
+// Note: there is no restore command. The old `restore_record` dispatcher — and a
+// later source-chain graft attempt — were both removed. Recovery is now
+// identity-aware recognition: a fresh install reads the user's existing DHT data
+// via their linked agent set (`get_my_agent_set`, a 2-hop walk of the identity
+// link graph), so nothing is re-created or duplicated. The backup feeds the CAL
+// §4.2.1 data export only.
 
 /// Build the user's canonical-shape backup payload for Vault.
 ///
@@ -2089,8 +2087,9 @@ pub async fn build_canonical_backup(
         let (entry_type_name, human_readable) = classify_dump_record(rec);
 
         // Count only the decodable user-data entry types (those with a
-        // non-null human_readable view). Infrastructure records are kept in
-        // `records` for graft but don't inflate the user-facing summary.
+        // non-null human_readable view). Infrastructure records keep their
+        // signed `raw_record` so the export is a complete copy of the chain,
+        // but they don't inflate the user-facing summary.
         if !human_readable.is_null() {
             *counts.entry(entry_type_name.clone()).or_insert(0) += 1;
         }
@@ -2161,7 +2160,8 @@ pub async fn build_canonical_backup(
 /// Classify a dumped source-chain record into a (entryType, human_readable)
 /// pair for the canonical backup. App entries we can decode get a type name +
 /// plain-JSON view; everything else gets an action-type label and a null
-/// human_readable (kept in the backup for graft, not shown as user data).
+/// human_readable (its signed `raw_record` stays in the backup for a complete,
+/// verifiable export, but it is not shown as user data).
 ///
 /// For forking developers: the `(zome_index, entry_index)` table below mirrors
 /// your DNA manifest's integrity-zome order and each integrity zome's
@@ -2205,9 +2205,9 @@ fn classify_dump_record(
         // polls_integrity (zome index 1)
         (1, 0) => decode_named::<Poll>("Poll", entry_bytes),
         (1, 1) => decode_named::<Vote>("Vote", entry_bytes),
-        // Flag / MigratedPoll: kept in raw_record for graft, but no
-        // human_readable view (commands.rs has no plain mirror struct for
-        // them). Not counted in the user-facing summary.
+        // Flag / MigratedPoll: kept as signed raw_record for a complete
+        // export, but no human_readable view (commands.rs has no plain mirror
+        // struct for them). Not counted in the user-facing summary.
         (1, 2) => ("Flag".to_string(), serde_json::Value::Null),
         (1, 3) => ("MigratedPoll".to_string(), serde_json::Value::Null),
         // EncryptedEntry holds ciphertext — no plaintext human_readable view.
@@ -2223,7 +2223,8 @@ fn classify_dump_record(
 
 /// Decode entry bytes into a named type for the human_readable view. Returns
 /// (name, json) on success, or (name, null) if bytes are absent or undecodable
-/// — the record is still kept (with its raw_record) for graft.
+/// — the record is still kept (with its signed raw_record) so the export stays
+/// a complete copy of the chain.
 fn decode_named<T: serde::de::DeserializeOwned + serde::Serialize>(
     name: &str,
     entry_bytes: Option<&[u8]>,
