@@ -1,10 +1,30 @@
 # ProofPoll
 
-Verified polls on Holochain with Flowsta identity linking.
+**Verified polls that can't be faked, censored, or quietly rewritten — running on your own machine, owned by the people who use them.**
 
-ProofPoll is a desktop app (Tauri v2 + Qwik) that runs a local Holochain conductor. Polls and votes are stored on a decentralized DHT — no central server. Identity verification through Flowsta ensures one vote per real person.
+ProofPoll is a free, open-source desktop app for polls and votes where the results actually mean something. It runs on Linux, macOS, and Windows. Two things set it apart from any normal poll:
 
-**This app is designed to be forked.** Change the entry types, swap polls for reviews or proposals, add your own features — the architecture (conductor management, identity linking, DNA migration, encrypted private data) works for any Holochain app. See [Forking Guide](#forking-guide) below.
+- **One vote, one real person.** Voters link a verified Flowsta identity, so every vote resolves to a single human — even across multiple devices — and duplicates are dropped. No emails to harvest, no accounts to farm; just sybil-resistant results.
+- **No one can rewrite or delete it.** Polls and votes live on a peer-to-peer network (Holochain), replicated and validated across everyone who runs the app. There's no admin who can change a result or take a poll down — not even us. Polls can be community-flagged as spam or misleading, but nothing is ever silently deleted.
+
+It even does something most people think is impossible: **private data on a public network.** Add a private rationale to a vote, or draft a poll before publishing it, and ProofPoll encrypts it on your machine before it ever leaves — peers store the ciphertext but can't read a byte of it.
+
+ProofPoll is built on **[Flowsta Vault](https://flowsta.com/vault/)**, which keeps your identity and keys on your own machine. The first time you sign in, Vault links your identity; after that, ProofPoll runs on its own.
+
+**[⬇ Download the latest release](https://github.com/WeAreFlowsta/ProofPoll/releases)** — Linux · macOS (Intel + Apple Silicon) · Windows. Windows builds are code-signed (verified publisher: FLOWSTA).
+
+> **Built to be forked.** ProofPoll is also a complete, working template for *any* desktop Holochain app — swap polls for reviews, proposals, a task tracker, a social feed. The genuinely hard parts (conductor lifecycle, identity linking, DNA migration, encrypted private data, running an always-on node) are solved and documented. See the [Forking Guide](#forking-guide).
+
+## What's New
+
+### v0.2.1 — 2026-06-05
+- **Windows builds are now code-signed.** Installers carry Flowsta's SSL.com OV certificate, so Windows shows **FLOWSTA** as the verified publisher instead of a SmartScreen "unknown publisher" warning.
+- **Security:** sanitized voter profile-picture image sources on the poll page (closes a DOM-based XSS finding).
+- **Integrity:** every release now ships a **`SHA256SUMS.txt`** so you can verify your downloads.
+- **Docs:** clarified that cross-device recovery is identity-aware *recognition* (re-link your identity, data syncs from the network), not a backup/replay.
+
+### v0.2.0
+- First public release — verified one-person-one-vote polling, community flagging, client-side-encrypted private data, cross-device identity recognition, and the full fork-ready template.
 
 ## Documentation
 
