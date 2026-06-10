@@ -114,10 +114,14 @@ pub struct EncryptedEntry {
     pub cipher: Vec<u8>,
     /// 24-byte nonce used in encryption.
     pub nonce: Vec<u8>,
-    /// Routing hint so the client knows how to deserialize after decryption.
-    /// Values: "vote_rationale", "draft_poll"
+    /// Always "private" (enforced by validate_encrypted_entry) — the entry body
+    /// never reveals content type. Routing is done by link type, which IS
+    /// publicly visible; see the metadata caveat in the README.
     pub entry_type_hint: String,
-    /// Optional reference to a related entry (e.g. the Vote this rationale belongs to).
+    /// Optional reference to a related entry (e.g. the Vote this rationale
+    /// belongs to). NOTE: stored in plaintext — peers can see the relationship.
+    /// Forks needing metadata privacy should encrypt references inside the
+    /// payload instead.
     pub related_hash: Option<ActionHash>,
 }
 
