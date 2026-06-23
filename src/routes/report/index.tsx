@@ -103,11 +103,16 @@ export default component$(() => {
   const items = useSignal<ItemListItem[]>([]);
   const loadingExisting = useSignal(true);
 
+  // The summary doubles as a search box (it drives the ranked dedup list) and
+  // as the issue's title when nothing matches and the reporter files new.
+  // There is no separate "what happened" field on this screen: detail is
+  // written as the first FINDING on the issue's detail page, so an issue's
+  // body lives in exactly one place (the findings thread), never split between
+  // `instructions` and a finding depending on which screen it was typed on.
   const summary = useSignal("");
   // Debounced mirror of `summary` — ranking keys off this so the list settles
   // a beat after the reporter stops typing rather than reshuffling per keystroke.
   const rankQuery = useSignal("");
-  const detail = useSignal("");
   const submitting = useSignal(false);
   const error = useSignal<string | null>(null);
 
@@ -163,12 +168,15 @@ export default component$(() => {
       .map((r) => r.iss);
   });
 
-  const submit = $(async () => {
+  // File a NEW issue: the typed line becomes the title; `instructions` is left
+  // empty (the body goes in as the first finding on the detail page). Then land
+  // on the new issue's detail screen so the reporter writes what happened there.
+  const fileNew = $(async () => {
     error.value = null;
 
     const s = summary.value.trim();
     if (!s) {
-      error.value = "A short summary is required";
+      error.value = "Type what went wrong first";
       return;
     }
 
@@ -188,7 +196,7 @@ export default component$(() => {
         campaign,
         section: FEEDBACK_SECTION,
         title: s,
-        instructions: detail.value.trim(),
+        instructions: "",
         look_for: "",
         order: maxOrder + 1,
       });
@@ -226,10 +234,10 @@ export default component$(() => {
     );
   }
 
+  const typed = summary.value.trim().length > 0;
   const hasMatches = rankedMatches.value.length > 0;
-  // The list to render under the "Already reported" heading: ranked matches
-  // when we have them (unless the reporter expanded everything), else the
-  // full list.
+  // The list to render: ranked matches when we have them (unless the reporter
+  // expanded everything), else the full list.
   const listToShow =
     hasMatches && !showAll.value ? rankedMatches.value : openIssues.value;
 
@@ -238,8 +246,10 @@ export default component$(() => {
       <h1 class="text-2xl font-bold mb-2">Report an issue</h1>
       <p class="text-sm text-gray-400 mb-6">
         Hit something the scripted scenarios don't cover — a bug, a surprise,
-        anything broken with no step for it? Start typing what went wrong;
-        we'll surface anything similar that's already been reported.
+        anything broken with no step for it? Describe it in a line first: we'll
+        surface anything similar that's already been reported, so you can add to
+        it instead of filing a duplicate. If nothing matches, you'll file a new
+        one and land on its page to write up what happened.
       </p>
 
       {error.value && (
@@ -249,10 +259,10 @@ export default component$(() => {
       )}
 
       <div class="space-y-5">
-        {/* Summary first, so duplicate-surfacing has something to match on. */}
+        {/* The summary is the search box AND the eventual issue title. */}
         <div>
           <label class="block text-sm font-medium text-gray-300 mb-1">
-            Summary
+            What went wrong?
           </label>
           <input
             type="text"
@@ -265,7 +275,7 @@ export default component$(() => {
           />
         </div>
 
-        {/* ── Already-reported list (re-ranks live as the summary is typed) ── */}
+        {/* ── Already-reported list (re-ranks live as the line is typed) ── */}
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5">
           <div class="flex items-baseline justify-between mb-3">
             <h2 class="text-sm font-medium text-gray-300">
@@ -320,35 +330,26 @@ export default component$(() => {
           )}
         </div>
 
-        {/* What-happened + file, beneath the dedup check. */}
-        <div>
-          <label class="block text-sm font-medium text-gray-300 mb-1">
-            What happened{" "}
-            <span class="text-gray-500 font-normal">(optional)</span>
-          </label>
-          <textarea
-            value={detail.value}
-            onInput$={(e) =>
-              (detail.value = (e.target as HTMLTextAreaElement).value)
-            }
-            class="w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-white focus:outline-none focus:border-indigo-500 h-32 resize-none"
-            placeholder="Steps to reproduce, what you expected, what you got…"
-          />
-        </div>
-
-        <button
-          type="button"
-          onClick$={submit}
-          disabled={submitting.value}
-          class="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium py-2.5 rounded-full"
-        >
-          {submitting.value ? "Filing…" : "File issue"}
-        </button>
-
-        <p class="text-xs text-gray-500 text-center">
-          Once filed, you'll land on the issue's page, where you and others can
-          add findings and the team can follow up.
-        </p>
+        {/* File-new: appears once a line is typed. Framed as "the search
+            didn't find it" — the only way to file is to say nothing matched. */}
+        {typed && (
+          <div>
+            <button
+              type="button"
+              onClick$={fileNew}
+              disabled={submitting.value}
+              class="w-full bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium py-2.5 rounded-full"
+            >
+              {submitting.value
+                ? "Filing…"
+                : "None of these — report it as new"}
+            </button>
+            <p class="text-xs text-gray-500 text-center mt-2">
+              Files “{summary.value.trim()}” as a new issue and takes you to its
+              page, where you and others add findings and the team follows up.
+            </p>
+          </div>
+        )}
       </div>
 
       <p class="mt-6 text-sm text-gray-500">
