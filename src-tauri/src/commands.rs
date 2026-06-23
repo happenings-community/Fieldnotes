@@ -672,6 +672,7 @@ pub async fn create_item(
     instructions: String,
     look_for: String,
     order: u32,
+    admin_grant_action_hash: Option<String>,
 ) -> Result<String, String> {
     // Owner-seeded — require a linked Flowsta identity (frontend gating
     // alone is bypassable).
@@ -682,15 +683,22 @@ pub async fn create_item(
     let client = state.app_client.lock().await;
     let client = client.as_ref().ok_or("Conductor not ready")?;
 
-    let input = CreateItemInput {
-        kind,
-        campaign,
-        section,
-        title,
-        instructions,
-        look_for,
-        order,
-    };
+    // For Scenario items, require an admin grant
+    if kind == ItemKind::Scenario && admin_grant_action_hash.is_none() {
+        return Err("Scenario items require an admin_grant_action_hash".to_string());
+    }
+
+    // Manually encode the input (we can't import CreateItemInput from the zome)
+    let input = serde_json::json!({
+        "kind": kind,
+        "admin_grant_action_hash": admin_grant_action_hash,
+        "campaign": campaign,
+        "section": section,
+        "title": title,
+        "instructions": instructions,
+        "look_for": look_for,
+        "order": order,
+    });
     let payload = ExternIO::encode(input).map_err(|e| e.to_string())?;
     let result = call_zome(client, POLLS_ZOME, "create_item", payload).await?;
 
@@ -701,10 +709,11 @@ pub async fn create_item(
 /// Bulk-create scenarios from a parsed Markdown campaign. The frontend
 /// parses the document into many CreateItemInput and sends them in one
 /// call; the zome returns the number created.
+/// Each item must have admin_grant_action_hash for Scenario kind.
 #[tauri::command]
 pub async fn import_items(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
-    items: Vec<CreateItemInput>,
+    items: Vec<serde_json::Value>,
 ) -> Result<u32, String> {
     if load_identity_link(&state.data_dir).is_none() {
         return Err("Sign in with Flowsta to import scenarios".to_string());
@@ -712,6 +721,15 @@ pub async fn import_items(
 
     let client = state.app_client.lock().await;
     let client = client.as_ref().ok_or("Conductor not ready")?;
+
+    // Validate that Scenario items have admin_grant_action_hash
+    for item in &items {
+        let kind = item.get("kind").and_then(|k| k.as_str());
+        let has_grant = item.get("admin_grant_action_hash").is_some();
+        if kind == Some("Scenario") && !has_grant {
+            return Err("All Scenario items require admin_grant_action_hash".to_string());
+        }
+    }
 
     let payload = ExternIO::encode(items).map_err(|e| e.to_string())?;
     let result = call_zome(client, POLLS_ZOME, "import_items", payload).await?;
