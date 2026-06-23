@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "ProofPoll",
+  "productName": "Fieldnotes",
   "version": "0.2.1",
   "identifier": "com.proofpoll.app",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "ProofPoll",
+        "title": "Fieldnotes",
         "width": 900,
         "height": 700,
         "minWidth": 700,
