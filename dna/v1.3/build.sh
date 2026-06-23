@@ -1,21 +1,21 @@
 #!/bin/bash
 
-# Build script for ProofPoll DNA v1.3
+# Build script for Fieldnotes DNA (forked from ProofPoll v1.3).
 #
-# v1.3 adds:
-#   - EncryptedEntry type for private data on public DHT
-#   - VoteToRationale and AgentDrafts link types
+# Builds ONLY the polls zome (now Item / Response / Finding) and reuses the
+# agent_linking_*.wasm already committed in workdir/ — so no
+# flowsta-agent-linking crate is needed. Identity/auth is unchanged.
 #
 # Prerequisites:
-#   - hc CLI 0.6.0: cargo install holochain_cli --version 0.6.0
-#   - flowsta-agent-linking repo cloned at ../../flowsta-agent-linking/
+#   - hc CLI 0.6.0
+#
+# Run from this directory:  cd dna/v1.3 && bash build.sh
 
 set -e
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-AGENT_LINKING_DIR="$SCRIPT_DIR/../../../flowsta-agent-linking"
 
-echo "Building ProofPoll DNA v1.3"
+echo "Building Fieldnotes DNA"
 
 if ! command -v hc &> /dev/null; then
     echo "Error: Holochain CLI (hc) not found"
@@ -25,25 +25,11 @@ fi
 
 mkdir -p workdir
 
-echo "Building agent_linking zomes from flowsta-agent-linking..."
-if [ ! -d "$AGENT_LINKING_DIR" ]; then
-    echo "Error: flowsta-agent-linking not found at $AGENT_LINKING_DIR"
-    echo "Clone it from: https://github.com/WeAreFlowsta/flowsta-agent-linking"
-    exit 1
-fi
-RUSTFLAGS='--cfg getrandom_backend="custom"' CARGO_TARGET_DIR="$AGENT_LINKING_DIR/target" \
-    cargo build --release --target wasm32-unknown-unknown \
-    --manifest-path "$AGENT_LINKING_DIR/Cargo.toml"
-
-echo "Building polls zomes (v1.3)..."
+echo "Building polls zomes (Item / Response / Finding)..."
 RUSTFLAGS='--cfg getrandom_backend="custom"' CARGO_TARGET_DIR=target \
     cargo build --release --target wasm32-unknown-unknown
 
-echo "Copying WASM files..."
-cp "$AGENT_LINKING_DIR/target/wasm32-unknown-unknown/release/flowsta_agent_linking_integrity.wasm" \
-    workdir/agent_linking_integrity.wasm
-cp "$AGENT_LINKING_DIR/target/wasm32-unknown-unknown/release/flowsta_agent_linking_coordinator.wasm" \
-    workdir/agent_linking_coordinator.wasm
+echo "Copying polls WASM (reusing the committed agent_linking WASM)..."
 cp target/wasm32-unknown-unknown/release/polls_integrity.wasm workdir/
 cp target/wasm32-unknown-unknown/release/polls_coordinator.wasm workdir/
 
@@ -62,7 +48,5 @@ fi
 
 echo ""
 echo "Build complete!"
-echo ""
-echo "Outputs:"
-echo "  - DNA: workdir/proofpoll_v1_3.dna"
+echo "  - DNA:  workdir/proofpoll_v1_3.dna"
 echo "  - hApp: workdir/proofpoll_v1_3_happ.happ"

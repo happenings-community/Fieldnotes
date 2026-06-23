@@ -113,6 +113,123 @@ export async function getPollVotes(
   });
 }
 
+// ── Fieldnotes types (Item / Response / Finding) ──────────────────────
+//
+// Replaces the poll data model. Return shapes are snake_case (serde field
+// names from Rust). When SENDING args, Tauri maps camelCase -> snake_case
+// for top-level command args (so createItem sends `lookFor`), but NOT for
+// objects nested inside an array (see importItems).
+
+export type ItemKind = "Scenario" | "Feedback";
+export type Verdict = "Pass" | "Fail" | "Partial" | "Skip";
+
+export interface Item {
+  kind: ItemKind;
+  campaign: string;
+  section: string;
+  title: string;
+  instructions: string;
+  look_for: string;
+  order: number;
+  created_at: number;
+}
+
+export interface ItemListItem {
+  hash: string;
+  item: Item;
+  author: string;
+}
+
+export interface ItemDetail {
+  item: Item;
+  author: string;
+}
+
+export interface ResponseData {
+  hash: string;
+  item_action_hash: string;
+  verdict: Verdict;
+  author: string;
+  created_at: number;
+}
+
+export interface FindingData {
+  hash: string;
+  item_action_hash: string;
+  text: string;
+  author: string;
+  created_at: number;
+}
+
+export interface CreateItemInput {
+  kind: ItemKind;
+  campaign: string;
+  section: string;
+  title: string;
+  instructions: string;
+  look_for: string;
+  order: number;
+}
+
+// ── Scenarios ─────────────────────────────────────────────────────────
+
+export async function getAllItems(): Promise<ItemListItem[]> {
+  return invoke<ItemListItem[]>("get_all_items");
+}
+
+export async function getItem(actionHash: string): Promise<ItemDetail | null> {
+  return invoke<ItemDetail | null>("get_item", { actionHash });
+}
+
+export async function createItem(input: CreateItemInput): Promise<string> {
+  // Top-level args: Tauri maps camelCase -> snake_case, so send `lookFor`.
+  return invoke<string>("create_item", {
+    kind: input.kind,
+    campaign: input.campaign,
+    section: input.section,
+    title: input.title,
+    instructions: input.instructions,
+    lookFor: input.look_for,
+    order: input.order,
+  });
+}
+
+export async function importItems(items: CreateItemInput[]): Promise<number> {
+  // Objects nested in the array keep snake_case keys (no camelCase mapping
+  // inside arrays). Verify empirically when the import screen is wired.
+  return invoke<number>("import_items", { items });
+}
+
+// ── Responses (verdicts) ──────────────────────────────────────────────
+
+export async function respond(
+  itemActionHash: string,
+  verdict: Verdict,
+): Promise<string> {
+  return invoke<string>("respond", { itemActionHash, verdict });
+}
+
+export async function getItemResponses(
+  itemActionHash: string,
+): Promise<ResponseData[]> {
+  return invoke<ResponseData[]>("get_item_responses", { itemActionHash });
+}
+
+// ── Findings ──────────────────────────────────────────────────────────
+
+export async function createFinding(
+  itemActionHash: string,
+  text: string,
+): Promise<string> {
+  return invoke<string>("create_finding", { itemActionHash, text });
+}
+
+export async function getItemFindings(
+  itemActionHash: string,
+): Promise<FindingData[]> {
+  return invoke<FindingData[]>("get_item_findings", { itemActionHash });
+}
+
 // ── Profile cache (Flowsta infrastructure — keep as-is) ───────────────
 //
 // Caches the user's display name and profile picture locally so the app

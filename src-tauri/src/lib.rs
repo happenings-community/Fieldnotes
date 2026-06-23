@@ -212,13 +212,17 @@ pub fn run() {
             // ── Infrastructure (keep as-is) ───────────────────────
             commands::get_app_status,
             commands::launch_vault,
-            // ── Your app commands (replace these) ─────────────────
-            commands::create_poll,
-            commands::get_poll,
-            commands::get_all_polls,
-            commands::delete_poll,
-            commands::cast_vote,
-            commands::get_poll_votes,
+            // ── Fieldnotes: scenarios / responses / findings ──────
+            commands::create_item,
+            commands::import_items,
+            commands::get_item,
+            commands::get_all_items,
+            commands::respond,
+            commands::get_item_responses,
+            commands::create_finding,
+            commands::get_item_findings,
+            // delete_poll: no Item delete in v0.0.1 — command kept dormant
+            // in commands.rs but intentionally not registered here.
             // ── Community moderation (keep or adapt) ──────────────
             commands::flag_poll,
             commands::get_poll_flags,
