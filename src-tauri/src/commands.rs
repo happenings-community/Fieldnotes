@@ -2028,17 +2028,47 @@ fn action_variant_label(action: &holochain_integrity_types::Action) -> String {
 // ── Administrator functions ────────────────────────────────────────
 
 /// Add an administrator by creating an AdminGrant entry.
-/// For now, accepts the raw admin pubkey and signature bytes.
-/// TODO: implement lair signing to generate signature automatically.
+/// Signs the admin pubkey with the progenitor's private key (stored in lair).
+/// This creates a validate-proof grant that lets the admin create Scenarios.
 #[tauri::command]
 pub async fn add_administrator(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
-    _admin_pubkey_str: String,
-    _progenitor_signature_bytes: Vec<u8>,
+    admin_pubkey_str: String,
+    progenitor_agent_key_bytes: [u8; 32],
 ) -> Result<String, String> {
-    let _client = state.app_client.lock().await;
-    // TODO: implement add_administrator once signature generation is resolved
-    Err("add_administrator not yet implemented (lair signing needs resolution)".to_string())
+    let client = state.app_client.lock().await;
+    let client = client.as_ref().ok_or("Conductor not ready")?;
+
+    let lair = state.lair_client.lock().await;
+    let lair = lair.as_ref().ok_or("Lair not ready")?;
+
+    // Parse the admin pubkey from string
+    let admin_pubkey = AgentPubKey::try_from(admin_pubkey_str.clone())
+        .map_err(|_| "Invalid admin pubkey format".to_string())?;
+
+    // Sign the admin pubkey bytes with the progenitor's key
+    let admin_pubkey_raw = admin_pubkey.get_raw_39().to_vec();
+    let signature_bytes = crate::crypto::sign_raw(lair, progenitor_agent_key_bytes, &admin_pubkey_raw)
+        .await?;
+
+    // Get the timestamp
+    let now = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_err(|e| format!("Time error: {}", e))?
+        .as_secs() as i64;
+
+    // Manually encode: { admin_pubkey, progenitor_signature, created_at }
+    let input = serde_json::json!({
+        "admin_pubkey": admin_pubkey_str,
+        "progenitor_signature": signature_bytes.clone(),
+        "created_at": now,
+    });
+
+    let payload = ExternIO::encode(input).map_err(|e| e.to_string())?;
+    let result = call_zome(client, POLLS_ZOME, "add_administrator", payload).await?;
+
+    let action_hash: ActionHash = result.decode().map_err(|e| e.to_string())?;
+    Ok(action_hash.to_string())
 }
 
 /// Check if the current agent is an administrator.
