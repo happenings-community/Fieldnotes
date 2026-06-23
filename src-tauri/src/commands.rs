@@ -2025,6 +2025,51 @@ fn action_variant_label(action: &holochain_integrity_types::Action) -> String {
 /// inclusion in the CAL §4.2.1 backup (the cryptographic keys the user needs to
 /// operate their data independently). Returns `None` if any is missing — we
 /// include all three or none.
+// ── Administrator functions ────────────────────────────────────────
+
+/// Add an administrator by creating an AdminGrant entry.
+/// For now, accepts the raw admin pubkey and signature bytes.
+/// TODO: implement lair signing to generate signature automatically.
+#[tauri::command]
+pub async fn add_administrator(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    _admin_pubkey_str: String,
+    _progenitor_signature_bytes: Vec<u8>,
+) -> Result<String, String> {
+    let _client = state.app_client.lock().await;
+    // TODO: implement add_administrator once signature generation is resolved
+    Err("add_administrator not yet implemented (lair signing needs resolution)".to_string())
+}
+
+/// Check if the current agent is an administrator.
+#[tauri::command]
+pub async fn is_administrator(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+) -> Result<bool, String> {
+    let client = state.app_client.lock().await;
+    let client = client.as_ref().ok_or("Conductor not ready")?;
+
+    let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
+    let result = call_zome(client, POLLS_ZOME, "is_administrator", payload).await?;
+    let is_admin: bool = result.decode().map_err(|e| e.to_string())?;
+    Ok(is_admin)
+}
+
+/// Get all administrators (their agent pubkeys).
+#[tauri::command]
+pub async fn get_administrators(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+) -> Result<Vec<String>, String> {
+    let client = state.app_client.lock().await;
+    let client = client.as_ref().ok_or("Conductor not ready")?;
+
+    let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
+    let result = call_zome(client, POLLS_ZOME, "get_administrators", payload).await?;
+    let admins: Vec<AgentPubKey> = result.decode().map_err(|e| e.to_string())?;
+
+    Ok(admins.iter().map(|pk| pk.to_string()).collect())
+}
+
 fn read_lair_backup_fields(data_dir: &Path) -> Option<(String, String, String)> {
     use base64::Engine;
     let passphrase = std::fs::read_to_string(data_dir.join("lair-passphrase")).ok()?;

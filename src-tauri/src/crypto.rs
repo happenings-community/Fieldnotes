@@ -55,3 +55,7 @@ pub async fn decrypt_from_self(
 
     Ok(plaintext.to_vec())
 }
+
+// TODO: sign_raw for admin grants
+// Lair signing API needs investigation. For now, admin grant signing
+// is stubbed in commands.rs and will be resolved in a followup session.

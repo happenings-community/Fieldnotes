@@ -224,6 +224,10 @@ pub fn run() {
             commands::get_item_findings,
             // delete_poll: no Item delete in v0.0.1 — command kept dormant
             // in commands.rs but intentionally not registered here.
+            // ── Administrator functions (new) ─────────────────────
+            commands::add_administrator,
+            commands::is_administrator,
+            commands::get_administrators,
             // ── Community moderation (keep or adapt) ──────────────
             commands::flag_poll,
             commands::get_poll_flags,
