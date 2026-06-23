@@ -20,6 +20,27 @@ enum EntryZomes {
     Integrity(polls_integrity::EntryTypes),
 }
 
+// ── DNA Properties ─────────────────────────────────────────────────────
+
+/// DNA-level configuration, burned in at hApp bundle time.
+/// For development, progenitor_pubkey can be null; in release builds it's
+/// the Flowsta Vault agent pubkey of the admin who signed the initial AdminGrant entries.
+#[derive(Serialize, Deserialize, Clone, Debug, SerializedBytes)]
+pub struct DnaProperties {
+    /// The progenitor's Flowsta Vault agent pubkey (hex-encoded AgentPubKey).
+    /// Used in validate() to verify AdminGrant signatures.
+    /// Null in dev; must be set before distribution.
+    pub progenitor_pubkey: Option<String>,
+}
+
+impl Default for DnaProperties {
+    fn default() -> Self {
+        DnaProperties {
+            progenitor_pubkey: None,
+        }
+    }
+}
+
 // ── Input types ───────────────────────────────────────────────────────
 
 #[derive(Serialize, Deserialize, Debug)]

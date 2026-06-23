@@ -15,6 +15,27 @@
 
 use hdi::prelude::*;
 
+// ── DNA Properties ─────────────────────────────────────────────────────
+
+/// DNA-level configuration, burned in at hApp bundle time.
+/// For development, progenitor_pubkey can be null; in release builds it's
+/// the Flowsta Vault agent pubkey of the admin who signed the initial AdminGrant entries.
+#[derive(Serialize, Deserialize, Clone, Debug, SerializedBytes)]
+pub struct DnaProperties {
+    /// The progenitor's Flowsta Vault agent pubkey (hex-encoded AgentPubKey).
+    /// Used in validate() to verify AdminGrant signatures.
+    /// Null in dev; must be set before distribution.
+    pub progenitor_pubkey: Option<String>,
+}
+
+impl Default for DnaProperties {
+    fn default() -> Self {
+        DnaProperties {
+            progenitor_pubkey: None,
+        }
+    }
+}
+
 // ── Field enums ───────────────────────────────────────────────────────
 
 /// Cryptographic grant authorizing an agent to create Scenario items.
@@ -178,14 +199,48 @@ pub fn validate(op: Op) -> ExternResult<ValidateCallbackResult> {
 }
 
 fn validate_admin_grant(grant: &AdminGrant) -> ExternResult<ValidateCallbackResult> {
-    // For now: basic non-empty check. Signature verification requires dna_info()
-    // (the progenitor pubkey), which is added in the next phase.
-    // TODO: verify grant.progenitor_signature against dna_info() progenitor pubkey
+    // Basic structural checks
     if grant.created_at == 0 {
         return Ok(ValidateCallbackResult::Invalid(
             "AdminGrant created_at must be non-zero".to_string(),
         ));
     }
+    
+    // Get DNA properties to read the progenitor pubkey
+    let dna_info = dna_info()?;
+    let properties = if let Ok(dna_props) = DnaProperties::try_from(dna_info.modifiers.properties) {
+        dna_props
+    } else {
+        DnaProperties::default()
+    };
+    
+    // If progenitor is set, verify the signature
+    if let Some(progenitor_pubkey_str) = properties.progenitor_pubkey {
+        match AgentPubKey::try_from(progenitor_pubkey_str.clone()) {
+            Ok(progenitor_pubkey) => {
+                // Create the payload to verify: the admin pubkey's raw bytes
+                let payload = grant.admin_pubkey.get_raw_39().to_vec();
+                
+                // Verify the signature
+                if !verify_signature(
+                    progenitor_pubkey,
+                    grant.progenitor_signature.clone(),
+                    payload,
+                )? {
+                    return Ok(ValidateCallbackResult::Invalid(
+                        "AdminGrant progenitor_signature does not verify against progenitor pubkey".to_string(),
+                    ));
+                }
+            }
+            Err(_) => {
+                return Ok(ValidateCallbackResult::Invalid(
+                    "Could not parse progenitor pubkey from DNA properties".to_string(),
+                ));
+            }
+        }
+    }
+    // If progenitor is null (dev mode), accept the grant
+    
     Ok(ValidateCallbackResult::Valid)
 }
 
