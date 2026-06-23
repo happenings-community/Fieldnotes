@@ -7,6 +7,7 @@ import {
 } from "@builder.io/qwik";
 import { useNavigate } from "@builder.io/qwik-city";
 import { getAllItems, type ItemListItem } from "~/lib/holochain";
+import { formatInvokeError } from "~/lib/errors";
 
 export default component$(() => {
   const nav = useNavigate();
@@ -21,7 +22,7 @@ export default component$(() => {
     try {
       items.value = await getAllItems();
     } catch (e: any) {
-      error.value = e?.message || "Failed to load scenarios";
+      error.value = formatInvokeError(e, "Failed to load scenarios");
     } finally {
       loading.value = false;
     }
