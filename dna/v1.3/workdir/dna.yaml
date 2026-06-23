@@ -3,7 +3,8 @@ manifest_version: "0"
 name: proofpoll_v1_3
 integrity:
   network_seed: "proofpoll-network-v1.3"
-  properties: ~
+  properties:
+    progenitor_pubkey: null
   zomes:
     - name: agent_linking_integrity
       path: agent_linking_integrity.wasm
