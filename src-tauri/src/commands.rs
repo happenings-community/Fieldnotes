@@ -2046,14 +2046,17 @@ fn action_variant_label(action: &holochain_integrity_types::Action) -> String {
 // ── Administrator functions ────────────────────────────────────────
 
 /// Add an administrator by creating an AdminGrant entry.
-/// Signs the admin pubkey with the progenitor's private key (stored in lair).
-/// This creates a validate-proof grant that lets the admin create Scenarios.
+/// Signs the admin pubkey with the LOCAL agent's private key (the progenitor,
+/// stored in lair). This creates a validate-proof grant that lets the admin
+/// create Scenarios. Only meaningful when called by the progenitor.
 #[tauri::command]
 pub async fn add_administrator(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
     admin_pubkey_str: String,
-    progenitor_agent_key_bytes: [u8; 32],
 ) -> Result<String, String> {
+    // Get the progenitor's (local agent's) key bytes for signing
+    let progenitor_agent_key_bytes = get_agent_ed25519_bytes(&state)?;
+
     let client = state.app_client.lock().await;
     let client = client.as_ref().ok_or("Conductor not ready")?;
 
@@ -2094,10 +2097,19 @@ pub async fn add_administrator(
 pub async fn is_administrator(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
 ) -> Result<bool, String> {
+    // Resolve the local agent's pubkey to check if THEY are an admin
+    let key_str = state
+        .agent_pub_key
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("Agent key not available")?;
+    let local_agent = parse_agent_pub_key_string(&key_str)?;
+
     let client = state.app_client.lock().await;
     let client = client.as_ref().ok_or("Conductor not ready")?;
 
-    let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
+    let payload = ExternIO::encode(local_agent).map_err(|e| e.to_string())?;
     let result = call_zome(client, POLLS_ZOME, "is_administrator", payload).await?;
     let is_admin: bool = result.decode().map_err(|e| e.to_string())?;
     Ok(is_admin)
