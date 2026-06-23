@@ -22,9 +22,12 @@ import {
   getItem,
   getItemResponses,
   respond,
+  getItemFindings,
+  createFinding,
   loadMyAgentSet,
   type Item,
   type ResponseData,
+  type FindingData,
   type Verdict,
 } from "~/lib/holochain";
 
@@ -53,6 +56,24 @@ const VERDICTS: { value: Verdict; label: string; accent: string }[] = [
     accent: "bg-gray-600 border-gray-500 text-white",
   },
 ];
+
+// Short, stable label for an agent pubkey until display-name resolution exists
+// (the agent-key → Flowsta display-name mapping is a later identity layer; the
+// zome deliberately doesn't store names on Finding/Response). First 8 chars is
+// enough to tell two testers apart at a glance.
+function shortAgent(pubkey: string): string {
+  return pubkey.length > 8 ? `${pubkey.slice(0, 8)}…` : pubkey;
+}
+
+// Render a finding's millisecond timestamp as a local date-time. created_at is
+// the snake_case field from the host (serde), in ms.
+function formatTime(ms: number): string {
+  try {
+    return new Date(ms).toLocaleString();
+  } catch {
+    return "";
+  }
+}
 
 export default component$(() => {
   const linked = useContext(linkedContext);
@@ -88,6 +109,21 @@ export default component$(() => {
   const submitting = useSignal(false);
   const verdictError = useSignal<string | null>(null);
 
+  // ── Findings state ──
+  // Findings are free-text observations on a scenario: append-only, many per
+  // agent, PLAINTEXT on the DHT for v0.0.1 (cohort-visible). No "replace mine"
+  // logic (unlike verdicts) and no tally — just the thread, newest last.
+  //
+  // KNOWN LATER LAYERS (not this phase): cohort encryption of findings (the
+  // Model B evidence layer — private screenshots/logs encrypted to
+  // {admins + uploader}) and the secret-scan soft-redirect (regex for
+  // PEM/ghp_/AKIA/JWT → "attach as a private log instead"). Both come after the
+  // tool is usable; this phase is plaintext only.
+  const findings = useSignal<FindingData[]>([]);
+  const findingInput = useSignal("");
+  const findingSubmitting = useSignal(false);
+  const findingError = useSignal<string | null>(null);
+
   useVisibleTask$(async () => {
     const hash = window.location.hash.startsWith("#")
       ? window.location.hash.slice(1)
@@ -113,7 +149,12 @@ export default component$(() => {
       item.value = result.item;
       author.value = result.author;
 
-      responses.value = await getItemResponses(hash);
+      const [responsesResult, findingsResult] = await Promise.all([
+        getItemResponses(hash),
+        getItemFindings(hash),
+      ]);
+      responses.value = responsesResult;
+      findings.value = findingsResult;
     } catch (e: any) {
       error.value = formatInvokeError(e, "Failed to load scenario");
     } finally {
@@ -135,6 +176,24 @@ export default component$(() => {
       verdictError.value = formatInvokeError(e, "Failed to record verdict");
     } finally {
       submitting.value = false;
+    }
+  });
+
+  // Post a finding, clear the box, reload the thread. Append-only, so reload
+  // simply re-reads the full list (newest will be at the end by created_at).
+  const submitFinding = $(async () => {
+    const text = findingInput.value.trim();
+    if (!text || !itemHash.value) return;
+    findingError.value = null;
+    findingSubmitting.value = true;
+    try {
+      await createFinding(itemHash.value, text);
+      findingInput.value = "";
+      findings.value = await getItemFindings(itemHash.value);
+    } catch (e: any) {
+      findingError.value = formatInvokeError(e, "Failed to add finding");
+    } finally {
+      findingSubmitting.value = false;
     }
   });
 
@@ -179,6 +238,11 @@ export default component$(() => {
   };
   for (const r of responses.value) counts[r.verdict] += 1;
   const totalResponses = responses.value.length;
+
+  // Findings oldest-first so the thread reads top-to-bottom chronologically.
+  const sortedFindings = [...findings.value].sort(
+    (a, b) => a.created_at - b.created_at,
+  );
 
   return (
     <div class="max-w-2xl mx-auto">
@@ -296,6 +360,87 @@ export default component$(() => {
           ) : (
             <p class="text-sm text-gray-500">
               Sign in with Flowsta to record a verdict on this scenario.
+            </p>
+          )}
+        </div>
+
+        {/* ── Findings thread ── */}
+        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5">
+          <div class="flex items-baseline justify-between mb-3">
+            <h2 class="text-sm font-medium text-gray-300">Findings</h2>
+            <span class="text-xs text-gray-500">
+              {sortedFindings.length} finding
+              {sortedFindings.length !== 1 ? "s" : ""}
+            </span>
+          </div>
+
+          {sortedFindings.length > 0 ? (
+            <ul class="space-y-3 mb-4">
+              {sortedFindings.map((f) => {
+                const mine = f.author === myAgent.value;
+                return (
+                  <li
+                    key={f.hash}
+                    class="border border-gray-800 rounded-lg p-3 bg-gray-950/40"
+                  >
+                    <div class="flex items-baseline gap-2 mb-1.5">
+                      <span
+                        class={[
+                          "text-xs font-medium",
+                          mine ? "text-indigo-300" : "text-gray-400",
+                        ].join(" ")}
+                      >
+                        {mine ? "You" : shortAgent(f.author)}
+                      </span>
+                      <span class="text-xs text-gray-600">
+                        {formatTime(f.created_at)}
+                      </span>
+                    </div>
+                    <p class="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
+                      {f.text}
+                    </p>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : (
+            <p class="text-sm text-gray-500 mb-4">
+              No findings yet. Record what you noticed while testing this
+              scenario.
+            </p>
+          )}
+
+          {linked.value ? (
+            <div>
+              <textarea
+                value={findingInput.value}
+                onInput$={(_, el) => (findingInput.value = el.value)}
+                disabled={findingSubmitting.value}
+                rows={3}
+                placeholder="What did you notice? Steps, unexpected behaviour, anything worth recording…"
+                class="w-full bg-gray-950 border border-gray-800 rounded-lg p-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-600 resize-y disabled:opacity-50"
+              />
+              <div class="flex items-center justify-between mt-2">
+                {findingError.value ? (
+                  <p class="text-xs text-red-400">{findingError.value}</p>
+                ) : (
+                  <span />
+                )}
+                <button
+                  type="button"
+                  disabled={
+                    findingSubmitting.value || !findingInput.value.trim()
+                  }
+                  onClick$={submitFinding}
+                  class="text-sm bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-medium transition-colors"
+                >
+                  {findingSubmitting.value ? "Adding…" : "Add finding"}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <p class="text-sm text-gray-500">
+              Sign in with Flowsta to add a finding.
             </p>
           )}
         </div>
