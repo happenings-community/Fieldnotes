@@ -443,3 +443,22 @@ export async function publishDraft(draftActionHash: string): Promise<string> {
 export async function deleteDraft(draftActionHash: string): Promise<string> {
   return invoke<string>("delete_draft", { draftActionHash });
 }
+
+export async function addAdministrator(
+  adminPubkeyStr: string
+): Promise<string> {
+  const result = await invoke("add_administrator", {
+    admin_pubkey_str: adminPubkeyStr,
+  });
+  return result as string;
+}
+
+export async function isAdministrator(): Promise<boolean> {
+  const result = await invoke("is_administrator", {});
+  return result as boolean;
+}
+
+export async function getAdministrators(): Promise<string[]> {
+  const result = await invoke("get_administrators", {});
+  return result as string[];
+}
