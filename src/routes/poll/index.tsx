@@ -24,6 +24,7 @@ import {
   respond,
   getItemFindings,
   createFinding,
+  appEnvironment,
   loadMyAgentSet,
   type Item,
   type ResponseData,
@@ -192,6 +193,26 @@ export default component$(() => {
       findings.value = await getItemFindings(itemHash.value);
     } catch (e: any) {
       findingError.value = formatInvokeError(e, "Failed to add finding");
+    } finally {
+      findingSubmitting.value = false;
+    }
+  });
+
+  // "Same here": one-tap corroboration on an emergent issue. Stamps the
+  // host environment (read at click time, so it can't go stale) and records
+  // it as a +1 finding, then reloads the thread. Same write-then-reload
+  // shape as submitFinding. Minimal by design - no count, no dedupe (see
+  // the file header note); a +1 is just a finding.
+  const submitSameHere = $(async () => {
+    if (!itemHash.value) return;
+    findingError.value = null;
+    findingSubmitting.value = true;
+    try {
+      const env = await appEnvironment();
+      await createFinding(itemHash.value, "+1 · " + env);
+      findings.value = await getItemFindings(itemHash.value);
+    } catch (e: any) {
+      findingError.value = formatInvokeError(e, "Failed to record \"Same here\"");
     } finally {
       findingSubmitting.value = false;
     }
@@ -380,6 +401,25 @@ export default component$(() => {
               {sortedFindings.length !== 1 ? "s" : ""}
             </span>
           </div>
+
+          {/* "Same here" - one-tap corroboration on an emergent issue,
+              records an env-stamped +1 finding. Feedback-only, sign-in-gated. */}
+          {it.kind === "Feedback" && linked.value && (
+            <div class="mb-4">
+              <button
+                type="button"
+                disabled={findingSubmitting.value}
+                onClick$={submitSameHere}
+                class="w-full sm:w-auto text-sm bg-amber-600 hover:bg-amber-500 disabled:opacity-50 disabled:cursor-not-allowed text-white px-4 py-2 rounded-lg font-medium transition-colors"
+              >
+                Same here — I hit this too
+              </button>
+              <p class="text-xs text-gray-500 mt-1.5">
+                Records a +1 with your OS and version, so the team can see
+                how widely this hits.
+              </p>
+            </div>
+          )}
 
           {sortedFindings.length > 0 ? (
             <ul class="space-y-3 mb-4">

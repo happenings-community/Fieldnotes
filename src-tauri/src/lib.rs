@@ -212,6 +212,7 @@ pub fn run() {
             // ── Infrastructure (keep as-is) ───────────────────────
             commands::get_app_status,
             commands::launch_vault,
+            commands::app_environment,
             // ── Fieldnotes: scenarios / responses / findings ──────
             commands::create_item,
             commands::import_items,

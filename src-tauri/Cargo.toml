@@ -62,6 +62,11 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # path (matters on macOS where "Application Support" contains a space).
 percent-encoding = "2"
 
+# Runtime OS name + version + arch for the "Same here" corroboration stamp
+# (e.g. "macOS 26.1 (arm64)"). The webview UA can't supply this — WKWebView
+# freezes the macOS version in its UA string — so it must come from the host.
+os_info = "3"
+
 # (libc dependency moved to the Unix-only target block below)
 
 # Unix-only: process liveness check via `kill(pid, 0)` in

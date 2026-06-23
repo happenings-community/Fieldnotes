@@ -624,6 +624,35 @@ pub fn launch_vault() -> Result<(), String> {
     }
 }
 
+/// Runtime environment string for the "Same here" corroboration stamp,
+/// e.g. "macOS 26.1 (arm64)". Read from the HOST, not the webview: a
+/// WKWebView UA freezes the macOS version ("10_15_7" forever), so a true
+/// version must come from os_info here. Infallible - worst case os_info
+/// yields "Unknown", which is still a usable (if vague) stamp.
+#[tauri::command]
+pub fn app_environment() -> String {
+    let info = os_info::get();
+
+    // os_info renders Type::Macos as "Mac OS"; prefer the conventional
+    // "macOS" spelling for the stamp. Other types render fine as-is.
+    let os = match info.os_type() {
+        os_info::Type::Macos => "macOS".to_string(),
+        other => other.to_string(),
+    };
+
+    let version = info.version().to_string();
+    let base = if version.is_empty() || version == "Unknown" {
+        os
+    } else {
+        format!("{os} {version}")
+    };
+
+    match info.architecture() {
+        Some(arch) => format!("{base} ({arch})"),
+        None => base,
+    }
+}
+
 // ── Poll commands (replace with your app's commands) ──────────────────
 //
 // Each command follows the same pattern:

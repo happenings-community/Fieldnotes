@@ -230,6 +230,13 @@ export async function getItemFindings(
   return invoke<FindingData[]>("get_item_findings", { itemActionHash });
 }
 
+// Runtime environment string for the "Same here" corroboration stamp,
+// e.g. "macOS 26.5.1 (arm64)". Read from the host (the webview UA can't
+// supply a real macOS version). Takes no args, so no camelCase mapping.
+export async function appEnvironment(): Promise<string> {
+  return invoke<string>("app_environment");
+}
+
 // ── Profile cache (Flowsta infrastructure — keep as-is) ───────────────
 //
 // Caches the user's display name and profile picture locally so the app
