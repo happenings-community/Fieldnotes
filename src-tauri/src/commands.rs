@@ -1117,247 +1117,6 @@ async fn notify_vault_revoke(app_name: &str, app_agent_pub_key: &str) -> Result<
     Ok(())
 }
 
-/// **DEPRECATED (v0.2.0+).** Replaced by the SDK's `dumpCellStateForBackup`
-/// (which goes through `decode_record_for_export` below). This function is
-/// kept only so the existing `startAutoBackup({ getData })` wiring in
-/// `routes/layout.tsx` keeps working while we transition; once the new
-/// `startAutoBackup({ adminWebsocket, cellIds, decodeRecordForExport })`
-/// signature ships in production this function should be removed.
-///
-/// Export this user's ProofPoll data for Vault auto-backup.
-/// Only includes the user's own data (CAL compliance):
-///   - Polls they created (with all votes for context)
-///   - Their votes on other people's polls
-///   - Cryptographic keys to recreate their identity
-#[tauri::command]
-pub async fn get_export_data(
-    state: tauri::State<'_, std::sync::Arc<AppState>>,
-) -> Result<serde_json::Value, String> {
-    let my_key = {
-        let key = state.agent_pub_key.lock().unwrap();
-        key.clone().ok_or("Agent key not available")?
-    };
-
-    // Fetch all polls and votes from the active DHT
-    let mut my_polls = Vec::new();
-    let mut my_votes = Vec::new();
-    {
-        let client = state.app_client.lock().await;
-        let client = client.as_ref().ok_or("Conductor not ready")?;
-
-        let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
-        let result = call_zome(client, POLLS_ZOME, "get_all_polls", payload).await?;
-        let records: Vec<Record> = result.decode().map_err(|e| e.to_string())?;
-
-        for record in &records {
-        let poll: Poll = decode_entry(record)?;
-        let hash = record.action_address().to_string();
-        let author = record.action().author().to_string();
-        let is_my_poll = author == my_key;
-
-        // Fetch votes for this poll
-        let vote_payload =
-            ExternIO::encode(record.action_address().clone()).map_err(|e| e.to_string())?;
-        let vote_result = call_zome(client, POLLS_ZOME, "get_poll_votes", vote_payload).await;
-
-        let all_votes: Vec<(u32, String)> = match vote_result {
-            Ok(vr) => {
-                let vote_records: Vec<Record> = vr.decode().unwrap_or_default();
-                vote_records
-                    .iter()
-                    .filter_map(|vr| {
-                        let vote: Vote = decode_entry(vr).ok()?;
-                        Some((vote.option_index, vr.action().author().to_string()))
-                    })
-                    .collect()
-            }
-            Err(_) => Vec::new(),
-        };
-
-        // If I created this poll, include it with all its votes
-        if is_my_poll {
-            let votes_json: Vec<serde_json::Value> = all_votes
-                .iter()
-                .map(|(idx, voter)| serde_json::json!({
-                    "option_index": idx,
-                    "voter": voter,
-                }))
-                .collect();
-
-            my_polls.push(serde_json::json!({
-                "hash": hash,
-                "title": poll.title,
-                "description": poll.description,
-                "options": poll.options,
-                "created_at": poll.created_at,
-                "closes_at": poll.closes_at,
-                "total_votes": votes_json.len(),
-                "votes": votes_json,
-            }));
-        }
-
-        // If I voted on this poll (whether mine or someone else's), record it
-        for (option_index, voter) in &all_votes {
-            if voter == &my_key {
-                my_votes.push(serde_json::json!({
-                    "poll_hash": hash,
-                    "poll_title": poll.title,
-                    "option_index": option_index,
-                    "option_text": poll.options.get(*option_index as usize),
-                }));
-            }
-        }
-    }
-    } // app_client lock released
-
-    // Fetch encrypted private data (vote rationales + drafts)
-
-    let agent_bytes = get_agent_ed25519_bytes(&state)?;
-    let mut my_rationales = Vec::new();
-    let mut my_drafts = Vec::new();
-
-    {
-        let client = state.app_client.lock().await;
-        let client = client.as_ref().ok_or("Conductor not ready")?;
-        let lair = state.lair_client.lock().await;
-        let lair = lair.as_ref().ok_or("Lair not connected")?;
-
-        // Fetch vote rationales for each of my votes
-        for vote_json in &my_votes {
-            if let Some(poll_hash) = vote_json.get("poll_hash").and_then(|h| h.as_str()) {
-                // Get all votes for this poll to find mine
-                if let Ok(hash) = ActionHash::try_from(poll_hash.to_string()) {
-                    let payload = ExternIO::encode(hash).map_err(|e| e.to_string())?;
-                    if let Ok(result) = call_zome(client, POLLS_ZOME, "get_poll_votes", payload).await {
-                        let vote_records: Vec<Record> = result.decode().unwrap_or_default();
-                        for vr in &vote_records {
-                            if vr.action().author().to_string() == my_key {
-                                let vote_hash = vr.action_address().clone();
-                                let rat_payload = ExternIO::encode(vote_hash).map_err(|e| e.to_string())?;
-                                if let Ok(rat_result) = call_zome(client, POLLS_ZOME, "get_vote_rationale", rat_payload).await {
-                                    let rat_record: Option<Record> = rat_result.decode().unwrap_or(None);
-                                    if let Some(rec) = rat_record {
-                                        if let Ok(ee) = decode_entry::<EncryptedEntryData>(&rec) {
-                                            let mut nonce = [0u8; 24];
-                                            if ee.nonce.len() == 24 {
-                                                nonce.copy_from_slice(&ee.nonce);
-                                                if let Ok(plaintext) = crate::crypto::decrypt_from_self(lair, agent_bytes, nonce, &ee.cipher).await {
-                                                    if let Ok(text) = String::from_utf8(plaintext) {
-                                                        my_rationales.push(serde_json::json!({
-                                                            "poll_title": vote_json.get("poll_title"),
-                                                            "voted_for": vote_json.get("option_text"),
-                                                            "rationale": text,
-                                                        }));
-                                                    }
-                                                }
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        // Fetch and decrypt draft polls
-        let drafts_payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
-        if let Ok(drafts_result) = call_zome(client, POLLS_ZOME, "get_my_drafts", drafts_payload).await {
-            let draft_records: Vec<Record> = drafts_result.decode().unwrap_or_default();
-            for record in &draft_records {
-                if let Ok(ee) = decode_entry::<EncryptedEntryData>(record) {
-                    let mut nonce = [0u8; 24];
-                    if ee.nonce.len() == 24 {
-                        nonce.copy_from_slice(&ee.nonce);
-                        if let Ok(plaintext) = crate::crypto::decrypt_from_self(lair, agent_bytes, nonce, &ee.cipher).await {
-                            if let Ok(draft) = serde_json::from_slice::<serde_json::Value>(&plaintext) {
-                                my_drafts.push(draft);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    // CAL compliance: include cryptographic key access information
-    let passphrase = state.passphrase.lock().unwrap().clone();
-    let lair_dir = state.data_dir.join("lair");
-
-    // Include lair keystore data (store_file) for portable key backup.
-    let store_file_path = lair_dir.join("store_file");
-    let lair_keystore_data = if store_file_path.exists() {
-        use base64::Engine;
-        match std::fs::read(&store_file_path) {
-            Ok(bytes) => Some(base64::engine::general_purpose::STANDARD.encode(&bytes)),
-            Err(_) => None,
-        }
-    } else {
-        None
-    };
-
-    let exported_at = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_secs();
-
-    Ok(serde_json::json!({
-        "_readme": concat!(
-            "Your complete ProofPoll data export. Includes polls you created, ",
-            "votes you cast, private vote rationales (decrypted), and draft polls (decrypted). ",
-            "Your cryptographic keys are included for full data portability (CAL compliance).",
-        ),
-
-        "format": {
-            "version": 4,
-            "exported_at": exported_at,
-        },
-
-        "you": {
-            "agent_pub_key": my_key,
-        },
-
-        "keys": {
-            "_readme": concat!(
-                "Your lair keystore contains the private signing key for your ProofPoll identity. ",
-                "The passphrase unlocks it. To restore: decode lair_keystore_data from base64, ",
-                "save as 'store_file' in a lair directory, and run lair-keystore with the passphrase.",
-            ),
-            "lair_passphrase": passphrase,
-            "lair_keystore_data": lair_keystore_data,
-        },
-
-        "polls_created": {
-            "count": my_polls.len(),
-            "polls": my_polls,
-        },
-
-        "votes_cast": {
-            "count": my_votes.len(),
-            "votes": my_votes,
-        },
-
-        "private_data": {
-            "_readme": concat!(
-                "Your private data, decrypted from encrypted entries on the DHT. ",
-                "On the network, this data is stored as opaque ciphertext that only you can read. ",
-                "This export includes the decrypted plaintext for your records.",
-            ),
-
-            "vote_rationales": {
-                "count": my_rationales.len(),
-                "rationales": my_rationales,
-            },
-
-            "draft_polls": {
-                "count": my_drafts.len(),
-                "drafts": my_drafts,
-            },
-        },
-    }))
-}
-
 /// Core lookup: the agents the agent-linking zome reports as directly linked
 /// to `agent` (an already-parsed key). Returns `AgentPubKey`s, NOT strings, so
 /// callers can chain hops without round-tripping through the string form —
@@ -1991,15 +1750,20 @@ pub async fn decode_record_for_export(
         .map_err(|e| format!("base64 decode: {}", e))?;
 
     match entry_type.as_str() {
-        "Poll" => {
-            let poll: Poll = rmp_serde::from_slice(&bytes)
-                .map_err(|e| format!("Poll decode: {}", e))?;
-            serde_json::to_value(poll).map_err(|e| e.to_string())
+        "Item" => {
+            let item: Item = rmp_serde::from_slice(&bytes)
+                .map_err(|e| format!("Item decode: {}", e))?;
+            serde_json::to_value(item).map_err(|e| e.to_string())
         }
-        "Vote" => {
-            let vote: Vote = rmp_serde::from_slice(&bytes)
-                .map_err(|e| format!("Vote decode: {}", e))?;
-            serde_json::to_value(vote).map_err(|e| e.to_string())
+        "Response" => {
+            let response: Response = rmp_serde::from_slice(&bytes)
+                .map_err(|e| format!("Response decode: {}", e))?;
+            serde_json::to_value(response).map_err(|e| e.to_string())
+        }
+        "Finding" => {
+            let finding: Finding = rmp_serde::from_slice(&bytes)
+                .map_err(|e| format!("Finding decode: {}", e))?;
+            serde_json::to_value(finding).map_err(|e| e.to_string())
         }
         other => Ok(serde_json::json!({
             "_warning": format!("Unknown entry type: {}", other),
@@ -2178,7 +1942,7 @@ pub async fn build_canonical_backup(
 ///
 /// ProofPoll v1.3 (`dna/v1.3/workdir/dna.yaml`):
 ///   integrity zomes: [0] agent_linking_integrity, [1] polls_integrity
-///   polls_integrity EntryTypes: [0] Poll [1] Vote [2] Flag [3] MigratedPoll [4] EncryptedEntry
+///   polls_integrity EntryTypes: [0] Item [1] Response [2] Finding
 fn classify_dump_record(
     rec: &holochain_state_types::SourceChainDumpRecord,
 ) -> (String, serde_json::Value) {
@@ -2211,15 +1975,9 @@ fn classify_dump_record(
 
     match (zome, entry_idx) {
         // polls_integrity (zome index 1)
-        (1, 0) => decode_named::<Poll>("Poll", entry_bytes),
-        (1, 1) => decode_named::<Vote>("Vote", entry_bytes),
-        // Flag / MigratedPoll: kept as signed raw_record for a complete
-        // export, but no human_readable view (commands.rs has no plain mirror
-        // struct for them). Not counted in the user-facing summary.
-        (1, 2) => ("Flag".to_string(), serde_json::Value::Null),
-        (1, 3) => ("MigratedPoll".to_string(), serde_json::Value::Null),
-        // EncryptedEntry holds ciphertext — no plaintext human_readable view.
-        (1, 4) => ("EncryptedEntry".to_string(), serde_json::Value::Null),
+        (1, 0) => decode_named::<Item>("Item", entry_bytes),
+        (1, 1) => decode_named::<Response>("Response", entry_bytes),
+        (1, 2) => decode_named::<Finding>("Finding", entry_bytes),
         // agent_linking_integrity (zome index 0)
         (0, 0) => ("IsSamePerson".to_string(), serde_json::Value::Null),
         _ => (

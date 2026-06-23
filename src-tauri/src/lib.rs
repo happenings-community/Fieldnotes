@@ -238,7 +238,6 @@ pub fn run() {
             commands::get_identity_link,
             commands::revoke_identity_link,
             // ── Data export + migration (keep as-is) ──────────────
-            commands::get_export_data,
             commands::get_migration_status,
             commands::abandon_pending_votes,
             // ── CAL-compliant backup + reinstall recovery ──────────
