@@ -17,6 +17,17 @@ use hdi::prelude::*;
 
 // ── Field enums ───────────────────────────────────────────────────────
 
+/// Cryptographic grant authorizing an agent to create Scenario items.
+/// Signed by the progenitor, stored in the DHT. Validates deterministically
+/// by verifying the signature against the progenitor pubkey from DNA properties.
+#[hdk_entry_helper]
+#[derive(Clone, PartialEq)]
+pub struct AdminGrant {
+    pub admin_pubkey: AgentPubKey,
+    pub progenitor_signature: Signature,
+    pub created_at: i64,
+}
+
 /// Whether an item is a directed test scenario (owner-seeded) or an
 /// emergent feedback post raised by a member.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
@@ -86,6 +97,7 @@ pub struct Finding {
 #[derive(Serialize, Deserialize)]
 #[serde(tag = "type")]
 pub enum EntryTypes {
+    AdminGrant(AdminGrant),
     Item(Item),
     Response(Response),
     Finding(Finding),
@@ -129,6 +141,7 @@ pub fn validate(op: Op) -> ExternResult<ValidateCallbackResult> {
         FlatOp::StoreEntry(store_entry) => match store_entry {
             OpEntry::CreateEntry { app_entry, .. } | OpEntry::UpdateEntry { app_entry, .. } => {
                 match app_entry {
+                    EntryTypes::AdminGrant(grant) => validate_admin_grant(&grant),
                     EntryTypes::Item(item) => validate_item(&item),
                     EntryTypes::Response(_) => Ok(ValidateCallbackResult::Valid),
                     EntryTypes::Finding(finding) => validate_finding(&finding),
@@ -160,12 +173,36 @@ pub fn validate(op: Op) -> ExternResult<ValidateCallbackResult> {
     }
 }
 
+fn validate_admin_grant(grant: &AdminGrant) -> ExternResult<ValidateCallbackResult> {
+    // For now: basic non-empty check. Signature verification requires dna_info()
+    // (the progenitor pubkey), which is added in the next phase.
+    // TODO: verify grant.progenitor_signature against dna_info() progenitor pubkey
+    if grant.created_at == 0 {
+        return Ok(ValidateCallbackResult::Invalid(
+            "AdminGrant created_at must be non-zero".to_string(),
+        ));
+    }
+    Ok(ValidateCallbackResult::Valid)
+}
+
 fn validate_item(item: &Item) -> ExternResult<ValidateCallbackResult> {
     if item.title.trim().is_empty() {
         return Ok(ValidateCallbackResult::Invalid(
             "Item title cannot be empty".to_string(),
         ));
     }
+    
+    // For Scenario items, author must have a valid AdminGrant.
+    // Feedback items are open to all authors.
+    if item.kind == ItemKind::Scenario {
+        // TODO: fetch AdminGrant for action.author and verify signature
+        // This requires must_get_valid_record or equivalent deterministic fetch.
+        // Placeholder: reject for now until we have the DHT fetch available.
+        return Ok(ValidateCallbackResult::Invalid(
+            "Scenario creation requires admin grant (not yet implemented)".to_string(),
+        ));
+    }
+    
     Ok(ValidateCallbackResult::Valid)
 }
 
