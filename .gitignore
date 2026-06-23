@@ -49,3 +49,10 @@ server/
 .vercel/
 .netlify/
 dna/v1.3/target/
+
+# Guarded-patch delivery scripts (throwaway; their effects are committed
+# in the files they edit, never as source themselves)
+patch_*.py
+
+# Tauri-generated schemas (regenerated on build)
+src-tauri/gen/schemas/
