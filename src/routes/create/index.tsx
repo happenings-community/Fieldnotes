@@ -8,7 +8,7 @@ import {
 import { useNavigate, Link } from "@builder.io/qwik-city";
 import { linkedContext } from "~/lib/context";
 import { setSignInIntent } from "~/lib/signin";
-import { createItem, getAllItems } from "~/lib/holochain";
+import { createItem, getAllItems, getAdminGrantHash } from "~/lib/holochain";
 
 export default component$(() => {
   const linked = useContext(linkedContext);
@@ -58,6 +58,14 @@ export default component$(() => {
 
     submitting.value = true;
     try {
+      // Fetch the admin grant hash — required for Scenario creation.
+      const grantHash = await getAdminGrantHash();
+      if (!grantHash) {
+        error.value = "You need an admin grant to create scenarios. Visit the Admin page first.";
+        submitting.value = false;
+        return;
+      }
+
       await createItem({
         kind: "Scenario",
         campaign: c,
@@ -66,6 +74,7 @@ export default component$(() => {
         instructions: instructions.value.trim(),
         look_for: lookFor.value.trim(),
         order: nextOrder.value,
+        admin_grant_action_hash: grantHash,
       });
 
       // Stay on the form: record the add, bump the order, clear the

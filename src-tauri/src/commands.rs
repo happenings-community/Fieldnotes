@@ -2052,10 +2052,22 @@ fn action_variant_label(action: &holochain_integrity_types::Action) -> String {
 #[tauri::command]
 pub async fn add_administrator(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
-    admin_pubkey_str: String,
+    admin_pubkey_str: Option<String>,
 ) -> Result<String, String> {
     // Get the progenitor's (local agent's) key bytes for signing
     let progenitor_agent_key_bytes = get_agent_ed25519_bytes(&state)?;
+
+    // Resolve the grantee: if no pubkey given, self-grant to the local agent.
+    // This is the bootstrap path — the progenitor grants themselves.
+    let admin_pubkey_str = match admin_pubkey_str {
+        Some(s) if !s.trim().is_empty() => s,
+        _ => state
+            .agent_pub_key
+            .lock()
+            .unwrap()
+            .clone()
+            .ok_or("Local agent key not available")?,
+    };
 
     let client = state.app_client.lock().await;
     let client = client.as_ref().ok_or("Conductor not ready")?;
@@ -2064,7 +2076,7 @@ pub async fn add_administrator(
     let lair = lair.as_ref().ok_or("Lair not ready")?;
 
     // Parse the admin pubkey from string
-    let admin_pubkey = AgentPubKey::try_from(admin_pubkey_str.clone())
+    let admin_pubkey = parse_agent_pub_key_string(&admin_pubkey_str)
         .map_err(|_| "Invalid admin pubkey format".to_string())?;
 
     // Sign the admin pubkey bytes with the progenitor's key
@@ -2113,6 +2125,29 @@ pub async fn is_administrator(
     let result = call_zome(client, POLLS_ZOME, "is_administrator", payload).await?;
     let is_admin: bool = result.decode().map_err(|e| e.to_string())?;
     Ok(is_admin)
+}
+
+/// Return the local agent's AdminGrant action hash (as a string), if they hold one.
+/// The frontend attaches this to Scenario creation so validate can verify it.
+#[tauri::command]
+pub async fn get_admin_grant_hash(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+) -> Result<Option<String>, String> {
+    let key_str = state
+        .agent_pub_key
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("Agent key not available")?;
+    let local_agent = parse_agent_pub_key_string(&key_str)?;
+
+    let client = state.app_client.lock().await;
+    let client = client.as_ref().ok_or("Conductor not ready")?;
+
+    let payload = ExternIO::encode(local_agent).map_err(|e| e.to_string())?;
+    let result = call_zome(client, POLLS_ZOME, "get_admin_grant_hash", payload).await?;
+    let grant_hash: Option<ActionHash> = result.decode().map_err(|e| e.to_string())?;
+    Ok(grant_hash.map(|h| h.to_string()))
 }
 
 /// Get all administrators (their agent pubkeys).

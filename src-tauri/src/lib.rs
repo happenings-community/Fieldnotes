@@ -228,6 +228,7 @@ pub fn run() {
             commands::add_administrator,
             commands::is_administrator,
             commands::get_administrators,
+            commands::get_admin_grant_hash,
             // ── Community moderation (keep or adapt) ──────────────
             commands::flag_poll,
             commands::get_poll_flags,

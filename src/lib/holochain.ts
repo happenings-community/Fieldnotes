@@ -169,6 +169,7 @@ export interface CreateItemInput {
   instructions: string;
   look_for: string;
   order: number;
+  admin_grant_action_hash?: string | null;
 }
 
 // ── Scenarios ─────────────────────────────────────────────────────────
@@ -191,7 +192,13 @@ export async function createItem(input: CreateItemInput): Promise<string> {
     instructions: input.instructions,
     lookFor: input.look_for,
     order: input.order,
+    adminGrantActionHash: input.admin_grant_action_hash ?? null,
   });
+}
+
+export async function getAdminGrantHash(): Promise<string | null> {
+  const result = await invoke("get_admin_grant_hash", {});
+  return result as string | null;
 }
 
 export async function importItems(items: CreateItemInput[]): Promise<number> {
@@ -445,10 +452,10 @@ export async function deleteDraft(draftActionHash: string): Promise<string> {
 }
 
 export async function addAdministrator(
-  adminPubkeyStr: string
+  adminPubkeyStr?: string
 ): Promise<string> {
   const result = await invoke("add_administrator", {
-    admin_pubkey_str: adminPubkeyStr,
+    adminPubkeyStr: adminPubkeyStr ?? null,
   });
   return result as string;
 }

@@ -281,6 +281,24 @@ pub fn is_administrator(admin_pubkey: AgentPubKey) -> ExternResult<bool> {
     Ok(!links.is_empty())
 }
 
+/// Return the AdminGrant action hash for a given agent, if they hold one.
+/// Used by the frontend to attach the grant to Scenario creation.
+#[hdk_extern]
+pub fn get_admin_grant_hash(admin_pubkey: AgentPubKey) -> ExternResult<Option<ActionHash>> {
+    let links = get_links(
+        LinkQuery::try_new(admin_pubkey, LinkTypes::AdminToGrant)?,
+        GetStrategy::default(),
+    )?;
+    match links.into_iter().next() {
+        Some(link) => {
+            let grant_hash = ActionHash::try_from(link.target)
+                .map_err(|_| wasm_error!("Invalid admin grant link target"))?;
+            Ok(Some(grant_hash))
+        }
+        None => Ok(None),
+    }
+}
+
 // ── Finding functions ───────────────────────────────────────────────────
 
 /// Add a free-text finding to an item. Many per agent; append-only.
