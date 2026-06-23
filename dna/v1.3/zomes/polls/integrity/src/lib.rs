@@ -258,35 +258,31 @@ fn validate_item(item: &Item) -> ExternResult<ValidateCallbackResult> {
     // Feedback items are open to all authors.
     if item.kind == ItemKind::Scenario {
         if let Some(grant_hash) = &item.admin_grant_action_hash {
-            // Fetch the grant deterministically (no DHT read, direct hash lookup)
+            // Fetch the grant record deterministically (no DHT read, direct hash lookup).
+            // If must_get_valid_record succeeds, the grant already passed validate_admin_grant,
+            // which verified the progenitor signature. We just need to confirm the Item author
+            // matches the admin_pubkey in the grant.
             match must_get_valid_record(grant_hash.clone()) {
-                Ok(record) => {
-                    // Extract the AdminGrant entry from the record
-                    if let Some(_entry) = record.signed_action.hashed.content.entry_hash() {
-                        // We have the entry hash; now fetch the entry itself
-                        // TODO: must_get_entry or must_get for the entry_hash
-                        // For now, placeholder that will be filled once we confirm the right function
-                        return Ok(ValidateCallbackResult::Valid);
-                    } else {
-                        return Ok(ValidateCallbackResult::Invalid(
-                            "AdminGrant action does not reference an entry".to_string(),
-                        ));
-                    }
+                Ok(_grant_record) => {
+                    // Grant exists and is valid. The signature was verified when it was created.
+                    // For now, accept Scenarios as long as a grant action hash is referenced.
+                    // TODO: deserialize the grant entry to verify author == grant.admin_pubkey
+                    Ok(ValidateCallbackResult::Valid)
                 }
-                Err(e) => {
-                    return Ok(ValidateCallbackResult::Invalid(
-                        format!("Failed to fetch AdminGrant: {:?}", e),
-                    ));
+                Err(_) => {
+                    Ok(ValidateCallbackResult::Invalid(
+                        "Could not fetch AdminGrant for Item validation".to_string(),
+                    ))
                 }
             }
         } else {
-            return Ok(ValidateCallbackResult::Invalid(
+            Ok(ValidateCallbackResult::Invalid(
                 "Scenario item must reference an AdminGrant action hash".to_string(),
-            ));
+            ))
         }
+    } else {
+        Ok(ValidateCallbackResult::Valid)
     }
-    
-    Ok(ValidateCallbackResult::Valid)
 }
 
 fn validate_finding(finding: &Finding) -> ExternResult<ValidateCallbackResult> {
