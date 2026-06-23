@@ -232,24 +232,53 @@ pub fn add_administrator(input: AddAdministratorInput) -> ExternResult<ActionHas
         (),
     )?;
     
+    // Link from the all-admins anchor to enumerate all admins network-wide
+    let anchor = all_admins_anchor()?;
+    create_link(
+        anchor,
+        action_hash.clone(),
+        LinkTypes::AllAdmins,
+        (),
+    )?;
+    
     Ok(action_hash)
 }
 
 /// Get all administrators (agents with valid AdminGrant entries).
 #[hdk_extern]
 pub fn get_administrators() -> ExternResult<Vec<AgentPubKey>> {
-    // Query all AdminGrant entries and return unique admin pubkeys
-    // This is a DHT query — coordinator level, not validate time
-    // For now, return empty vec as placeholder until we implement the query
-    Ok(Vec::new())
+    let anchor = all_admins_anchor()?;
+    let links = get_links(
+        LinkQuery::try_new(anchor, LinkTypes::AllAdmins)?,
+        GetStrategy::default(),
+    )?;
+    
+    let mut admins = Vec::new();
+    for link in links {
+        let grant_hash = ActionHash::try_from(link.target)
+            .map_err(|_| wasm_error!("Invalid admin grant link target"))?;
+        if let Some(record) = get(grant_hash, GetOptions::default())? {
+            if let Some(entry) = record.entry().as_option() {
+                if let Ok(grant) = AdminGrant::try_from(entry.clone()) {
+                    if !admins.contains(&grant.admin_pubkey) {
+                        admins.push(grant.admin_pubkey);
+                    }
+                }
+            }
+        }
+    }
+    
+    Ok(admins)
 }
 
 /// Check if a specific agent pubkey is an administrator.
 #[hdk_extern]
-pub fn is_administrator(_admin_pubkey: AgentPubKey) -> ExternResult<bool> {
-    // Check if the given pubkey has at least one valid AdminGrant
-    // For now, return false as placeholder
-    Ok(false)
+pub fn is_administrator(admin_pubkey: AgentPubKey) -> ExternResult<bool> {
+    let links = get_links(
+        LinkQuery::try_new(admin_pubkey, LinkTypes::AdminToGrant)?,
+        GetStrategy::default(),
+    )?;
+    Ok(!links.is_empty())
 }
 
 // ── Finding functions ───────────────────────────────────────────────────

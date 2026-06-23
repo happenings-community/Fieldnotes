@@ -140,6 +140,8 @@ pub enum LinkTypes {
     ItemToFindings,
     /// From an admin's pubkey to their AdminGrant action hash.
     AdminToGrant,
+    /// From the all-admins anchor to each AdminGrant action hash.
+    AllAdmins,
 }
 
 // ── Anchors ───────────────────────────────────────────────────────────
@@ -156,6 +158,16 @@ pub fn all_items_anchor() -> ExternResult<EntryHash> {
         instructions: String::new(),
         look_for: String::new(),
         order: 0,
+        created_at: 0,
+    })
+}
+
+/// Returns a deterministic hash to use as the base for AllAdmins links.
+/// Used to enumerate all AdminGrant entries network-wide.
+pub fn all_admins_anchor() -> ExternResult<EntryHash> {
+    hash_entry(&AdminGrant {
+        admin_pubkey: AgentPubKey::from_raw_36(vec![0; 36]),
+        progenitor_signature: Signature([0u8; 64]),
         created_at: 0,
     })
 }
@@ -195,6 +207,7 @@ pub fn validate(op: Op) -> ExternResult<ValidateCallbackResult> {
             LinkTypes::ItemToResponses => Ok(ValidateCallbackResult::Valid),
             LinkTypes::ItemToFindings => Ok(ValidateCallbackResult::Valid),
             LinkTypes::AdminToGrant => Ok(ValidateCallbackResult::Valid),
+            LinkTypes::AllAdmins => Ok(ValidateCallbackResult::Valid),
         },
         FlatOp::RegisterDeleteLink { .. } => Ok(ValidateCallbackResult::Valid),
         _ => Ok(ValidateCallbackResult::Valid),
