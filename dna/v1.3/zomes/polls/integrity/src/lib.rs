@@ -138,6 +138,8 @@ pub enum LinkTypes {
     ItemToResponses,
     /// From an Item's action hash to each Finding's action hash.
     ItemToFindings,
+    /// From an admin's pubkey to their AdminGrant action hash.
+    AdminToGrant,
 }
 
 // ── Anchors ───────────────────────────────────────────────────────────
@@ -192,6 +194,7 @@ pub fn validate(op: Op) -> ExternResult<ValidateCallbackResult> {
             }
             LinkTypes::ItemToResponses => Ok(ValidateCallbackResult::Valid),
             LinkTypes::ItemToFindings => Ok(ValidateCallbackResult::Valid),
+            LinkTypes::AdminToGrant => Ok(ValidateCallbackResult::Valid),
         },
         FlatOp::RegisterDeleteLink { .. } => Ok(ValidateCallbackResult::Valid),
         _ => Ok(ValidateCallbackResult::Valid),

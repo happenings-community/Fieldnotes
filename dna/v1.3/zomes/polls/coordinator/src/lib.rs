@@ -64,6 +64,12 @@ pub struct RespondInput {
 }
 
 #[derive(Serialize, Deserialize, Debug)]
+pub struct AddAdministratorInput {
+    pub admin_pubkey: AgentPubKey,
+    pub progenitor_signature: Signature,
+}
+
+#[derive(Serialize, Deserialize, Debug)]
 pub struct CreateFindingInput {
     pub item_action_hash: ActionHash,
     pub text: String,
@@ -201,6 +207,49 @@ pub fn get_item_responses(item_action_hash: ActionHash) -> ExternResult<Vec<Reco
     }
 
     Ok(records)
+}
+
+// ── Administrator functions ────────────────────────────────────────
+
+/// Create an AdminGrant entry authorizing an agent to create Scenario items.
+/// The progenitor signature must be provided by the host (via Tauri/lair).
+#[hdk_extern]
+pub fn add_administrator(input: AddAdministratorInput) -> ExternResult<ActionHash> {
+    let now = sys_time()?.as_seconds_and_nanos().0;
+    let grant = AdminGrant {
+        admin_pubkey: input.admin_pubkey.clone(),
+        progenitor_signature: input.progenitor_signature,
+        created_at: now,
+    };
+    
+    let action_hash = create_entry(&EntryZomes::Integrity(EntryTypes::AdminGrant(grant)))?;
+    
+    // Link from the admin pubkey to the grant for easy lookup
+    create_link(
+        input.admin_pubkey.clone(),
+        action_hash.clone(),
+        LinkTypes::AdminToGrant,
+        (),
+    )?;
+    
+    Ok(action_hash)
+}
+
+/// Get all administrators (agents with valid AdminGrant entries).
+#[hdk_extern]
+pub fn get_administrators() -> ExternResult<Vec<AgentPubKey>> {
+    // Query all AdminGrant entries and return unique admin pubkeys
+    // This is a DHT query — coordinator level, not validate time
+    // For now, return empty vec as placeholder until we implement the query
+    Ok(Vec::new())
+}
+
+/// Check if a specific agent pubkey is an administrator.
+#[hdk_extern]
+pub fn is_administrator(_admin_pubkey: AgentPubKey) -> ExternResult<bool> {
+    // Check if the given pubkey has at least one valid AdminGrant
+    // For now, return false as placeholder
+    Ok(false)
 }
 
 // ── Finding functions ───────────────────────────────────────────────────
