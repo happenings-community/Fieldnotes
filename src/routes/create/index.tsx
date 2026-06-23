@@ -112,7 +112,16 @@ export default component$(() => {
 
   return (
     <div class="max-w-xl mx-auto">
-      <h1 class="text-2xl font-bold mb-6">Add scenario</h1>
+      <h1 class="text-2xl font-bold mb-2">Add scenario</h1>
+      <p class="text-sm text-gray-400 mb-6">
+        Have the full set?{" "}
+        <Link
+          href="/import/"
+          class="text-indigo-400 hover:text-indigo-300 underline"
+        >
+          Bulk import from templates.json →
+        </Link>
+      </p>
 
       {error.value && (
         <div class="bg-red-900/50 border border-red-700 text-red-300 px-4 py-3 rounded-lg mb-4">
