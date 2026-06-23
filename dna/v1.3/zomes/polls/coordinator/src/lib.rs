@@ -25,6 +25,9 @@ enum EntryZomes {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct CreateItemInput {
     pub kind: ItemKind,
+    /// For Scenario items: action hash of the AdminGrant authorizing creation.
+    /// For Feedback items: None.
+    pub admin_grant_action_hash: Option<ActionHash>,
     pub campaign: String,
     pub section: String,
     pub title: String,
@@ -52,6 +55,7 @@ fn do_create_item(input: CreateItemInput) -> ExternResult<ActionHash> {
 
     let item = Item {
         kind: input.kind,
+        admin_grant_action_hash: input.admin_grant_action_hash,
         campaign: input.campaign,
         section: input.section,
         title: input.title,
