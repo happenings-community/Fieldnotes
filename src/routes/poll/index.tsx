@@ -282,7 +282,9 @@ export default component$(() => {
       <div class="space-y-5">
         {it.instructions.trim() && (
           <div class="bg-gray-900 border border-gray-800 rounded-lg p-5">
-            <h2 class="text-sm font-medium text-gray-300 mb-2">What to do</h2>
+            <h2 class="text-sm font-medium text-gray-300 mb-2">
+              {it.kind === "Feedback" ? "What happened" : "What to do"}
+            </h2>
             <p class="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
               {it.instructions}
             </p>
@@ -298,14 +300,18 @@ export default component$(() => {
           </div>
         )}
 
-        {!it.instructions.trim() && !it.look_for.trim() && (
-          <p class="text-gray-500 text-sm">
-            No instructions recorded for this scenario yet.
-          </p>
-        )}
+        {it.kind !== "Feedback" &&
+          !it.instructions.trim() &&
+          !it.look_for.trim() && (
+            <p class="text-gray-500 text-sm">
+              No instructions recorded for this scenario yet.
+            </p>
+          )}
 
-        {/* ── Verdict control ── */}
-        <div class="bg-gray-900 border border-gray-800 rounded-lg p-5">
+        {/* ── Verdict control (scenarios only; an emergent issue isn't
+            Pass/Fail/Partial/Skip-shaped, so it's hidden for Feedback) ── */}
+        {it.kind !== "Feedback" && (
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-5">
           <div class="flex items-baseline justify-between mb-3">
             <h2 class="text-sm font-medium text-gray-300">Your verdict</h2>
             <span class="text-xs text-gray-500">
@@ -362,7 +368,8 @@ export default component$(() => {
               Sign in with Flowsta to record a verdict on this scenario.
             </p>
           )}
-        </div>
+          </div>
+        )}
 
         {/* ── Findings thread ── */}
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5">
