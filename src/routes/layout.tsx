@@ -390,6 +390,22 @@ export default component$(() => {
                   Create
                 </button>
               )}
+              {linked.value ? (
+                <Link
+                  href="/report/"
+                  class={`text-sm ${isActive("/report/") ? "text-indigo-400 font-medium" : "text-gray-400 hover:text-gray-200"}`}
+                >
+                  Report
+                </Link>
+              ) : (
+                <button
+                  type="button"
+                  onClick$={() => (showSignIn.value = true)}
+                  class={`text-sm ${isActive("/report/") ? "text-indigo-400 font-medium" : "text-gray-400 hover:text-gray-200"}`}
+                >
+                  Report
+                </button>
+              )}
               {linked.value && (
                 <Link
                   href="/drafts/"
