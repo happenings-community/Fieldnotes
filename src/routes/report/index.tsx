@@ -235,6 +235,10 @@ export default component$(() => {
   }
 
   const typed = summary.value.trim().length > 0;
+  // Mid-debounce: the live input has moved on from the ranked query, so a
+  // result is still settling. Derived, not a separate flag.
+  const searching =
+    typed && summary.value.trim() !== rankQuery.value.trim();
   const hasMatches = rankedMatches.value.length > 0;
   // The list to render: ranked matches when we have them (unless the reporter
   // expanded everything), else the full list.
@@ -274,6 +278,26 @@ export default component$(() => {
             placeholder="One line: what's broken or surprising"
           />
         </div>
+
+        {/* Search status: makes the dedup search visible, so a clean
+            result reads as "we checked" rather than silence. */}
+        {typed && (
+          <p class="text-xs -mt-2">
+            {searching ? (
+              <span class="text-gray-500">Searching reported issues…</span>
+            ) : hasMatches ? (
+              <span class="text-amber-400/80">
+                {rankedMatches.value.length} possible match
+                {rankedMatches.value.length !== 1 ? "es" : ""} below — is
+                yours one of them?
+              </span>
+            ) : openIssues.value.length > 0 ? (
+              <span class="text-emerald-400/80">
+                Nothing similar found — file it as new below.
+              </span>
+            ) : null}
+          </p>
+        )}
 
         {/* ── Already-reported list (re-ranks live as the line is typed) ── */}
         <div class="bg-gray-900 border border-gray-800 rounded-lg p-5">
