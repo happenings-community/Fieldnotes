@@ -264,6 +264,40 @@ export default component$(() => {
   // once the progenitor key is burned into DNA properties. This is the
   // chicken-and-egg breaker — you become admin here, then the gated Admin
   // control room appears in the nav.
+  // CAL 1.0 export: the user obtains their own data on demand. The backend
+  // build_canonical_backup dumps this agent's full source chain (every Item,
+  // Response and Finding they authored) with human-readable views plus the
+  // signed raw records. We hand it over as a downloaded JSON file via a Blob
+  // object URL — no native dialog plugin needed, works under the null CSP.
+  const exportingData = useSignal(false);
+  const exportError = useSignal<string | null>(null);
+  const exportSuccess = useSignal<string | null>(null);
+  const downloadMyData = $(async () => {
+    exportError.value = null;
+    exportSuccess.value = null;
+    exportingData.value = true;
+    try {
+      const payload = await invoke<any>("build_canonical_backup");
+      const json = JSON.stringify(payload, null, 2);
+      const blob = new Blob([json], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const stamp = new Date().toISOString().slice(0, 10);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `fieldnotes-export-${stamp}.json`;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+      const count = payload?._summary?.totalRecords ?? 0;
+      exportSuccess.value = `Exported ${count} record${count === 1 ? "" : "s"} to your Downloads folder.`;
+    } catch (e: any) {
+      exportError.value = `Could not export your data: ${e}`;
+    } finally {
+      exportingData.value = false;
+    }
+  });
+
   const becomeAdmin = $(async () => {
     adminGrantError.value = null;
     adminGrantMsg.value = null;
@@ -334,6 +368,30 @@ export default component$(() => {
               {success.value}
             </div>
           )}
+
+          {/* Export my data (CAL 1.0) */}
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+            <p class="text-sm text-gray-300 mb-1">Your data</p>
+            <p class="text-xs text-gray-500 mb-3">
+              Download everything you&rsquo;ve authored &mdash; scenarios,
+              verdicts and findings &mdash; as a portable JSON file. This is
+              your data to keep, under the terms of the licence.
+            </p>
+            <button
+              type="button"
+              onClick$={downloadMyData}
+              disabled={exportingData.value}
+              class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-gray-100 font-medium px-4 py-2 rounded-full text-sm"
+            >
+              {exportingData.value ? "Preparing..." : "Download my data"}
+            </button>
+            {exportError.value && (
+              <p class="mt-3 text-sm text-red-400">{exportError.value}</p>
+            )}
+            {exportSuccess.value && (
+              <p class="mt-3 text-sm text-emerald-400">{exportSuccess.value}</p>
+            )}
+          </div>
 
           {/* Administrator status / bootstrap self-grant */}
           <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">

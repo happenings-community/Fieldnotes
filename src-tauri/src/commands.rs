@@ -2048,10 +2048,13 @@ fn classify_dump_record(
         .map(|app_bytes| app_bytes.as_ref().bytes().as_slice());
 
     match (zome, entry_idx) {
-        // polls_integrity (zome index 1)
-        (1, 0) => decode_named::<Item>("Item", entry_bytes),
-        (1, 1) => decode_named::<Response>("Response", entry_bytes),
-        (1, 2) => decode_named::<Finding>("Finding", entry_bytes),
+        // polls_integrity (zome index 1). NOTE the entry-index order follows
+        // the EntryTypes enum: AdminGrant(0), Item(1), Response(2), Finding(3).
+        // AdminGrant is an authority record, not user content — no human view.
+        (1, 0) => ("AdminGrant".to_string(), serde_json::Value::Null),
+        (1, 1) => decode_named::<Item>("Item", entry_bytes),
+        (1, 2) => decode_named::<Response>("Response", entry_bytes),
+        (1, 3) => decode_named::<Finding>("Finding", entry_bytes),
         // agent_linking_integrity (zome index 0)
         (0, 0) => ("IsSamePerson".to_string(), serde_json::Value::Null),
         _ => (
