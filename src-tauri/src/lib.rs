@@ -231,6 +231,10 @@ pub fn run() {
             commands::get_item_responses,
             commands::create_finding,
             commands::get_item_findings,
+            // ── Encrypted attachments ─────────────────────────────
+            commands::create_encrypted_attachment,
+            commands::get_finding_attachments,
+            commands::decrypt_attachment,
             // delete_poll: no Item delete in v0.0.1 — command kept dormant
             // in commands.rs but intentionally not registered here.
             // ── Administrator functions (new) ─────────────────────

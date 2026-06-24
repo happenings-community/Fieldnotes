@@ -30,6 +30,9 @@ import {
   loadMyAgentSet,
   archiveItem,
   isAdministrator,
+  createEncryptedAttachment,
+  getFindingAttachments,
+  decryptAttachment,
   type Item,
   type ResponseData,
   type FindingData,
@@ -138,6 +141,14 @@ export default component$(() => {
   );
   const findingSubmitting = useSignal(false);
   const findingError = useSignal<string | null>(null);
+  // Attachment state: which finding is mid-attach, and a status note.
+  const attachingHash = useSignal<string | null>(null);
+  const attachMessage = useSignal<string | null>(null);
+  // Admin view: decrypted images keyed by finding hash, and which finding's
+  // attachments are currently loading.
+  const decryptedImages = useSignal<Record<string, string[]>>({});
+  const loadingAttachments = useSignal<string | null>(null);
+  const attachViewError = useSignal<string | null>(null);
 
   useVisibleTask$(async () => {
     const hash = window.location.hash.startsWith("#")
@@ -208,6 +219,54 @@ export default component$(() => {
     } catch (e: any) {
       archiveError.value = formatInvokeError(e, "Failed to archive scenario");
       archiving.value = false;
+    }
+  });
+
+  // Attach an encrypted image to one of my findings. Reads the file as base64
+  // and hands it to the zome, which encrypts and wraps it to the admin cohort.
+  const attachToFinding = $(async (findingHash: string, file: File) => {
+    attachMessage.value = null;
+    attachingHash.value = findingHash;
+    try {
+      // Read file as base64 (strip the data: URL prefix).
+      const base64: string = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          const comma = result.indexOf(",");
+          resolve(comma >= 0 ? result.slice(comma + 1) : result);
+        };
+        reader.onerror = () => reject(new Error("Could not read file"));
+        reader.readAsDataURL(file);
+      });
+      await createEncryptedAttachment(findingHash, base64, file.type || "image/png");
+      attachMessage.value = "Encrypted attachment added (visible to admins only).";
+    } catch (e) {
+      attachMessage.value = `Attach failed: ${e}`;
+    } finally {
+      attachingHash.value = null;
+    }
+  });
+
+  // Admin: load and decrypt all attachments on a finding, render as images.
+  const viewAttachments = $(async (findingHash: string) => {
+    attachViewError.value = null;
+    loadingAttachments.value = findingHash;
+    try {
+      const hashes = await getFindingAttachments(findingHash);
+      const images: string[] = [];
+      for (const h of hashes) {
+        const base64 = await decryptAttachment(h);
+        images.push(`data:image/*;base64,${base64}`);
+      }
+      decryptedImages.value = { ...decryptedImages.value, [findingHash]: images };
+      if (images.length === 0) {
+        attachViewError.value = "No attachments on this finding.";
+      }
+    } catch (e) {
+      attachViewError.value = `Could not load attachments: ${e}`;
+    } finally {
+      loadingAttachments.value = null;
     }
   });
 
@@ -512,6 +571,88 @@ export default component$(() => {
                     <p class="text-sm text-gray-200 whitespace-pre-wrap leading-relaxed">
                       {f.text}
                     </p>
+                    {mine && (
+                      <div class="mt-3">
+                        <label
+                          class={[
+                            "inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg cursor-pointer transition-colors",
+                            attachingHash.value === f.hash
+                              ? "bg-gray-700 text-gray-300"
+                              : "bg-gray-800 hover:bg-gray-700 text-gray-200",
+                          ].join(" ")}
+                        >
+                          {attachingHash.value === f.hash
+                            ? "Encrypting…"
+                            : "📎 Attach image"}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            disabled={attachingHash.value === f.hash}
+                            onChange$={async (_, el) => {
+                              const file = el.files?.[0];
+                              if (file) await attachToFinding(f.hash, file);
+                              el.value = "";
+                            }}
+                            class="hidden"
+                          />
+                        </label>
+                        <span class="text-xs text-gray-500 ml-2">
+                          Encrypted — admins only
+                        </span>
+                        {attachMessage.value && (
+                          <p
+                            class={[
+                              "text-xs mt-1.5",
+                              attachMessage.value.startsWith("Attach failed")
+                                ? "text-red-400"
+                                : "text-green-400",
+                            ].join(" ")}
+                          >
+                            {attachMessage.value}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                    {isAdmin.value && (
+                      <div class="mt-3">
+                        <button
+                          type="button"
+                          disabled={loadingAttachments.value === f.hash}
+                          onClick$={() => viewAttachments(f.hash)}
+                          class="inline-flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white transition-colors"
+                        >
+                          {loadingAttachments.value === f.hash
+                            ? "Decrypting…"
+                            : "🔓 View encrypted attachments"}
+                        </button>
+                        {loadingAttachments.value === null &&
+                          attachViewError.value &&
+                          decryptedImages.value[f.hash] === undefined && (
+                            <p class="text-xs text-gray-400 mt-1.5">
+                              {attachViewError.value}
+                            </p>
+                          )}
+                        {decryptedImages.value[f.hash] &&
+                          decryptedImages.value[f.hash].length > 0 && (
+                            <div class="mt-2 space-y-2">
+                              {decryptedImages.value[f.hash].map((src, i) => (
+                                <img
+                                  key={i}
+                                  src={src}
+                                  alt="Encrypted attachment"
+                                  class="max-w-full rounded-lg border border-gray-800"
+                                />
+                              ))}
+                            </div>
+                          )}
+                        {decryptedImages.value[f.hash] &&
+                          decryptedImages.value[f.hash].length === 0 && (
+                            <p class="text-xs text-gray-500 mt-1.5">
+                              No attachments on this finding.
+                            </p>
+                          )}
+                      </div>
+                    )}
                   </li>
                 );
               })}
