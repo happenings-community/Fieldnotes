@@ -118,6 +118,42 @@ pub struct Finding {
 
 // ── Entry type enum ───────────────────────────────────────────────────
 
+/// An administrator's published x25519 companion public key, used as the
+/// wrap target for cohort-encrypted attachments. The matching private key is
+/// held in lair (generated via create_x25519_keypair); only the public key is
+/// published here. Identity (who this admin is) is their agent/Vault key; this
+/// is purely their encryption key.
+#[hdk_entry_helper]
+#[derive(Clone, PartialEq)]
+pub struct AdminX25519Key {
+    pub x25519_pubkey: X25519PubKey,
+    pub created_at: i64,
+}
+
+/// One wrapped copy of a content key, for a single recipient in the cohort.
+#[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
+pub struct WrappedKey {
+    pub recipient_x: X25519PubKey,
+    pub wrapped: XSalsa20Poly1305EncryptedData,
+}
+
+/// A cohort-encrypted attachment on a Finding. The payload is encrypted once
+/// with a random content key (ciphertext); that content key is wrapped to each
+/// cohort member's x25519 key (wrapped_keys). A recipient locates their entry
+/// by recipient_x, ingests it with their lair-held private key, and decrypts.
+/// Re-wrappable: a later-added admin gets a new WrappedKey appended without
+/// re-encrypting the payload.
+#[hdk_entry_helper]
+#[derive(Clone, PartialEq)]
+pub struct EncryptedAttachment {
+    pub ciphertext: XSalsa20Poly1305EncryptedData,
+    pub wrapped_keys: Vec<WrappedKey>,
+    pub sender_x: X25519PubKey,
+    /// Optional MIME-ish hint for display (e.g. "image/png"); no content leak.
+    pub media_hint: String,
+    pub created_at: i64,
+}
+
 #[hdk_entry_types]
 #[unit_enum(UnitEntryTypes)]
 #[derive(Serialize, Deserialize)]
@@ -127,6 +163,8 @@ pub enum EntryTypes {
     Item(Item),
     Response(Response),
     Finding(Finding),
+    AdminX25519Key(AdminX25519Key),
+    EncryptedAttachment(EncryptedAttachment),
 }
 
 // ── Link types ────────────────────────────────────────────────────────
@@ -144,6 +182,10 @@ pub enum LinkTypes {
     AdminToGrant,
     /// From the all-admins anchor to each AdminGrant action hash.
     AllAdmins,
+    /// From a Finding's action hash to each EncryptedAttachment action hash.
+    FindingToAttachment,
+    /// From the all-x25519-keys anchor to each AdminX25519Key action hash.
+    AllAdminX25519Keys,
 }
 
 // ── Anchors ───────────────────────────────────────────────────────────
@@ -175,6 +217,14 @@ pub fn all_admins_anchor() -> ExternResult<EntryHash> {
     })
 }
 
+/// Deterministic anchor for AllAdminX25519Keys links (sentinel AdminX25519Key).
+pub fn all_x25519_keys_anchor() -> ExternResult<EntryHash> {
+    hash_entry(&AdminX25519Key {
+        x25519_pubkey: X25519PubKey::from([0u8; 32]),
+        created_at: 0,
+    })
+}
+
 // ── Validation ────────────────────────────────────────────────────────
 
 #[hdk_extern]
@@ -187,6 +237,12 @@ pub fn validate(op: Op) -> ExternResult<ValidateCallbackResult> {
                     EntryTypes::Item(item) => validate_item(&item),
                     EntryTypes::Response(_) => Ok(ValidateCallbackResult::Valid),
                     EntryTypes::Finding(finding) => validate_finding(&finding),
+                    // Companion encryption key and encrypted attachment: the
+                    // cryptography is the access control, not validation. Any
+                    // author may publish their own x25519 key and commit their
+                    // own encrypted attachments.
+                    EntryTypes::AdminX25519Key(_) => Ok(ValidateCallbackResult::Valid),
+                    EntryTypes::EncryptedAttachment(_) => Ok(ValidateCallbackResult::Valid),
                 }
             }
             _ => Ok(ValidateCallbackResult::Valid),
@@ -211,6 +267,8 @@ pub fn validate(op: Op) -> ExternResult<ValidateCallbackResult> {
             LinkTypes::ItemToFindings => Ok(ValidateCallbackResult::Valid),
             LinkTypes::AdminToGrant => Ok(ValidateCallbackResult::Valid),
             LinkTypes::AllAdmins => Ok(ValidateCallbackResult::Valid),
+            LinkTypes::FindingToAttachment => Ok(ValidateCallbackResult::Valid),
+            LinkTypes::AllAdminX25519Keys => Ok(ValidateCallbackResult::Valid),
         },
         FlatOp::RegisterDeleteLink { .. } => Ok(ValidateCallbackResult::Valid),
         _ => Ok(ValidateCallbackResult::Valid),

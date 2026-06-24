@@ -59,3 +59,4 @@ src-tauri/gen/schemas/
 
 # Guarded-patch dry-run artefacts
 *.patched
+tests/sweettest/target/
