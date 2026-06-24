@@ -6,7 +6,7 @@ Fieldnotes turns a test plan into a living, shared workspace. A team loads a cam
 
 It was built for a real job: testing the [Requests & Offers](https://github.com/happenings-community/requests-and-offers) (R&O) mutual-aid platform, by running its test scenarios through a tool that is itself a Holochain app. And it was built to make a point — that you don't have to be a developer to build a useful Holochain application. (See [Lineage](#lineage-proof-that-anyone-can-build-this).)
 
-> **Alpha software.** This is Fieldnotes v0.1.0, an early release for invited testers. Expect rough edges. It is distributed as an unsigned build (see [Installing](#installing) for the macOS workaround).
+> **Alpha software.** This is Fieldnotes v0.1.1, an early release for invited testers. Expect rough edges. It is distributed as an unsigned build (see [Installing](#installing) for the macOS workaround).
 
 ---
 
@@ -25,7 +25,7 @@ It was built for a real job: testing the [Requests & Offers](https://github.com/
 
 ## What's New
 
-### v0.1.0 — first alpha (June 2026)
+### v0.1.1 — first alpha (June 2026)
 
 The first invited-tester release.
 
