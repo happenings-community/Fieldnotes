@@ -1,579 +1,122 @@
-# ProofPoll
+# Fieldnotes
 
-**Verified polls that can't be faked, censored, or quietly rewritten — running on your own machine, owned by the people who use them.**
+**A Holochain desktop app for structured scenario testing — run a shared script of test scenarios, record what you find, and have every finding live on a peer-to-peer network owned by the people doing the testing.**
 
-ProofPoll is a free, open-source desktop app for polls and votes where the results actually mean something. It runs on Linux, macOS, and Windows. Two things set it apart from any normal poll:
+Fieldnotes turns a test plan into a living, shared workspace. A team loads a campaign of scenarios (step-by-step things to try), and each tester works through them on their own machine — recording a verdict (Pass / Fail / Partial / Skip), writing free-text findings, and corroborating what others have already hit. The scenarios, verdicts, and findings all live on a Holochain DHT, replicated across everyone running the app. There's no central server holding the results.
 
-- **One vote, one real person.** Voters link a verified Flowsta identity, so every vote resolves to a single human — even across multiple devices — and duplicates are dropped. No emails to harvest, no accounts to farm; just sybil-resistant results.
-- **No one can rewrite or delete it.** Polls and votes live on a peer-to-peer network (Holochain), replicated and validated across everyone who runs the app. There's no admin who can change a result or take a poll down — not even us. Polls can be community-flagged as spam or misleading, but nothing is ever silently deleted.
+It was built for a real job: testing the [Requests & Offers](https://github.com/happenings-community/requests-and-offers) (R&O) mutual-aid platform, by running its test scenarios through a tool that is itself a Holochain app. And it was built to make a point — that you don't have to be a developer to build a useful Holochain application. (See [Lineage](#lineage-proof-that-anyone-can-build-this).)
 
-It even does something most people think is impossible: **private data on a public network.** Add a private rationale to a vote, or draft a poll before publishing it, and ProofPoll encrypts it on your machine before it ever leaves — peers store the ciphertext but can't read a byte of it.
+> **Alpha software.** This is Fieldnotes v0.1.0, an early release for invited testers. Expect rough edges. It is distributed as an unsigned build (see [Installing](#installing) for the macOS workaround).
 
-ProofPoll is built on **[Flowsta Vault](https://flowsta.com/vault/)**, which keeps your identity and keys on your own machine. The first time you sign in, Vault links your identity; after that, ProofPoll runs on its own.
+---
 
-**[⬇ Download the latest release](https://github.com/WeAreFlowsta/ProofPoll/releases)** — Linux · macOS (Intel + Apple Silicon) · Windows. Windows builds are code-signed (verified publisher: FLOWSTA).
+## What Fieldnotes does
 
-> **Built to be forked.** ProofPoll is also a complete, working template for *any* desktop Holochain app — swap polls for reviews, proposals, a task tracker, a social feed. The genuinely hard parts (conductor lifecycle, identity linking, DNA migration, encrypted private data, running an always-on node) are solved and documented. See the [Forking Guide](#forking-guide).
+- **Shared scenario boards.** A campaign of test scenarios, grouped into sections, that every tester sees. Scenarios are imported in bulk and gated so only administrators can add them.
+- **Verdicts and findings.** For each scenario, a tester records a verdict and adds findings — observations, steps to reproduce, anything worth keeping. Findings are an append-only thread; nothing is silently overwritten.
+- **Corroboration.** A one-tap "same here" stamps a finding with the tester's environment (OS and architecture), so a pattern across machines becomes visible.
+- **Encrypted attachments.** A tester can attach an image (a screenshot, a log capture) to their own finding, encrypted so only the administrator cohort can read it. Peers store the ciphertext but cannot read it. (New crypto — see the caveat under [What's New](#whats-new).)
+- **Emergent-issue reports.** Testers can file issues that no scenario covered, with a live duplicate-check that surfaces similar existing reports as they type.
+- **Verified identity.** Every tester links a [Flowsta Vault](https://flowsta.com/vault/) identity, so contributions resolve to a real person across devices, with no email harvesting or account farming.
+- **Your data is yours.** A one-click export hands you a complete, portable copy of everything you've authored — a requirement of the licence Fieldnotes ships under, not an afterthought.
+- **A nudge before you leak.** As you type a finding or report, Fieldnotes flags text that looks like private data (an email, a token, an IP) so you can review before submitting. Findings are public by design, so the help is in not putting private things in them by accident.
+
+---
 
 ## What's New
 
-### v0.2.1 — 2026-06-05
-- **Windows builds are now code-signed.** Installers carry Flowsta's SSL.com OV certificate, so Windows shows **FLOWSTA** as the verified publisher instead of a SmartScreen "unknown publisher" warning.
-- **Security:** sanitized voter profile-picture image sources on the poll page (closes a DOM-based XSS finding).
-- **Integrity:** every release now ships a **`SHA256SUMS.txt`** so you can verify your downloads.
-- **Docs:** clarified that cross-device recovery is identity-aware *recognition* (re-link your identity, data syncs from the network), not a backup/replay.
+### v0.1.0 — first alpha (June 2026)
 
-### v0.2.0
-- First public release — verified one-person-one-vote polling, community flagging, client-side-encrypted private data, cross-device identity recognition, and the full fork-ready template.
+The first invited-tester release.
 
-## Documentation
+- Scenario testing on a Holochain DHT: shared boards, per-tester verdicts, append-only findings, cross-machine corroboration, and emergent-issue reports with live duplicate detection.
+- A validation-enforced administrator gate (scenario creation is restricted to administrators in the integrity layer, not just the UI). Runs in a permissive mode in this alpha — see [Running your own network](#running-your-own-network).
+- Encrypted attachments scoped to the administrator cohort: a tester attaches an image to a finding, readable only by administrators. Adding an administrator later grants access without re-encrypting the image.
+- Archive (not delete) for scenarios — hiding a scenario preserves every verdict and finding attached to it.
+- A one-click, portable CAL-compliant export of everything you've authored.
 
-ProofPoll is the live reference implementation of every Flowsta-on-Holochain integration pattern. The authoritative cross-app docs (and the up-to-date version of every link below) live at **[docs.flowsta.com](https://docs.flowsta.com)**. Useful starting points whether you're a human or an AI assistant:
-
-- **[Building Holochain Apps with Flowsta](https://docs.flowsta.com/vault/holochain-apps)** — the full integration guide this README implements.
-- **[For Holochain Developers](https://docs.flowsta.com/holochain/for-developers)** — the three integration options (OAuth-only, agent linking + Vault, Tauri Vault auth) and what you get with each.
-- **[@flowsta/holochain SDK reference](https://docs.flowsta.com/sdk/holochain)** — every function ProofPoll calls into, including identity linking, cross-device recognition, and the canonical-shape backup pipeline.
-- **[Vault IPC reference](https://docs.flowsta.com/vault/ipc-reference)** — the localhost API; the canonical backup payload shape is documented there.
-
-This README focuses on the *fork mechanics* — what to rename, what to keep, where the seams are. For the *why* and the *recommended patterns*, follow the links above.
-
-## Stack
-
-- **Frontend**: Qwik, TypeScript, Tailwind CSS
-- **Backend**: Tauri v2 (Rust), Holochain 0.6.1
-- **DNA**: Rust (hdi 0.7.0, hdk 0.6.0 — non-breaking on the 0.6.1 conductor)
-- **Identity**: Flowsta agent linking via `flowsta-agent-linking` crate
-- **Encryption**: lair xsalsa20poly1305 via `crypto_box_xsalsa_by_sign_pub_key`
-
-## Quick Start
-
-```bash
-# Prerequisites
-# - Rust + wasm32-unknown-unknown target
-# - holochain + lair-keystore binaries (v0.6.1) — drop into src-tauri/binaries/
-#     named `holochain-<target-triple>` and `lair-keystore-<target-triple>`.
-#     CI does this automatically from the official Holochain GitHub release;
-#     for local dev, either fetch them yourself or rebuild from source.
-# - hc CLI: cargo install holochain_cli --version 0.6.0
-#     (0.6.0 hc CLI produces bundles the 0.6.1 conductor reads — no recompile
-#     needed for the 0.6.0 → 0.6.1 non-breaking upgrade.)
-# - Node.js 18+
-# - flowsta-agent-linking repo cloned at ../flowsta-agent-linking/
-
-# Build all DNA versions
-bash build-all.sh
-
-# Install frontend dependencies
-npm install
-
-# Run in dev mode
-cargo tauri dev
-```
-
-## DNA Versions
-
-| Version | Network Seed | Features |
-|---|---|---|
-| v1.0 | `proofpoll-network-v1.0` | Polls, votes, agent linking |
-| v1.1 | `proofpoll-network-v1.1` | + Community flagging, migration support |
-| v1.2 | `proofpoll-network-v1.2` | + Public/anonymous poll types, voter profiles |
-| v1.3 | `proofpoll-network-v1.3` | + Encrypted private data (vote rationale, draft polls) |
-
-All versions are installed side-by-side during migration. All new reads and writes go to v1.3.
-
-## Encrypted Private Data (v1.3)
-
-ProofPoll demonstrates how to store **private data on a public DHT**. Entries are encrypted client-side using lair's xsalsa20poly1305 crypto_box before being committed to the DHT. The data is replicated across peers for resilience, but only the author can decrypt it.
-
-### How it works
-
-1. **Encrypt** — Tauri encrypts plaintext using the agent's Ed25519 signing key (lair converts to x25519 internally)
-2. **Store** — the encrypted blob is committed as a public `EncryptedEntry` on the DHT
-3. **Gossip** — peers replicate the ciphertext like any other entry — they can see it exists but cannot read it
-4. **Decrypt** — only the author's lair-managed private key can decrypt
-
-### What peers see on the DHT
-
-```
-cipher: [187, 202, 33, 175, 31, 134, ...]  (opaque bytes)
-nonce:  [244, 219, 96, 104, 85, 138, ...]  (random, unique)
-hint:   "private"                            (no metadata about content type)
-```
-
-No information about whether the entry is a vote rationale, draft poll, or anything else.
-
-### Features
-
-- **Vote rationale** — after voting, add a private note about why you voted that way. Encrypted, only visible to you. Stored on the DHT linked to your vote via `VoteToRationale`.
-- **Draft polls** — save polls privately before publishing. Encrypted on the DHT, listed on the Drafts page. Publish when ready (creates a real poll, deletes the draft).
-
-### Key files
-
-| File | Purpose |
-|---|---|
-| `src-tauri/src/crypto.rs` | `encrypt_to_self` / `decrypt_from_self` via lair crypto_box |
-| `dna/v1.3/zomes/polls/integrity/src/lib.rs` | `EncryptedEntry` type, `VoteToRationale` + `AgentDrafts` link types |
-| `dna/v1.3/zomes/polls/coordinator/src/lib.rs` | `create_encrypted_entry`, `get_vote_rationale`, `get_my_drafts`, `delete_encrypted_entry` |
-| `src-tauri/src/commands.rs` | 6 Tauri commands: save/get rationale, save/get/publish/delete drafts |
-| `src/routes/poll/[id]/index.tsx` | Vote rationale UI (private note textarea) |
-| `src/routes/drafts/index.tsx` | Drafts page (list, publish, delete) |
-| `src/routes/create/index.tsx` | "Save as Draft" button |
-
-### For forking developers
-
-The encryption pattern is generic — `EncryptedEntry` stores any encrypted blob. To add your own private data types:
-
-1. Encrypt your data with `crate::crypto::encrypt_to_self()` in a Tauri command
-2. Call `create_encrypted_entry` with a link type that fits your use case
-3. Add a new link type in the integrity zome if needed (e.g. `ItemToPrivateNote`)
-4. Decrypt with `crate::crypto::decrypt_from_self()` when reading
-
-The `entry_type_hint` field is always `"private"` — no metadata is leaked. Routing is done by link type, not by the hint.
-
-## Community Flagging (v1.1)
-
-Polls can be flagged by signed-in users for: Spam, Misleading, Off Topic, or Inappropriate.
-
-- **Censorship-resistant**: Flags are a UI-layer opinion. The poll and all votes remain on the DHT forever. No data is deleted.
-- **Sybil-resistant**: One flag per Flowsta identity per poll (same deduplication as votes).
-- **Configurable threshold**: Polls with >= `FLAG_HIDE_THRESHOLD` flags (default 3) are hidden from the default view. Users can toggle "Show flagged" to see them.
-- **Forking developers**: Change `FLAG_HIDE_THRESHOLD` in the coordinator zome to suit your community size.
+> **Honest note on the encryption.** The encrypted-attachment crypto is new in this release. It has unit tests covering round-trip correctness, tamper detection, and wrong-key rejection, and it has been verified end-to-end in the running app — but it has **not** been through an external security review or audit. Treat it as defence-in-depth for an alpha on test data, not as a guarantee for genuinely sensitive material. If something must never be exposed, don't put it in this alpha.
 
 ---
 
-## Forking Guide
+## Installing
 
-This section is for developers (and AIs) who want to fork ProofPoll into a completely different app — a review platform, a task tracker, a social feed, anything. The architecture is app-agnostic; the poll/vote specifics are easy to swap out.
+Fieldnotes is a desktop app. Download the build for your platform from the [Releases page](https://github.com/happenings-community/Fieldnotes/releases).
 
-### Step 1: Rename Everything
+You also need the **Flowsta Vault** desktop app installed and a Flowsta identity — Fieldnotes uses it to sign you in. Vault only needs to be running for the first sign-in; after that, Fieldnotes works on its own.
 
-These identifiers **must** change or your app will conflict with ProofPoll:
+### macOS — unsigned build
 
-| What | Where | Current Value | Change To |
-|---|---|---|---|
-| Bundle ID | `src-tauri/tauri.conf.json` | `com.proofpoll.app` | `com.yourcompany.yourapp` |
-| Product name | `src-tauri/tauri.conf.json` | `ProofPoll` | `YourApp` |
-| Rust crate name | `src-tauri/Cargo.toml` | `proofpoll` | `yourapp` |
-| npm package name | `package.json` | `proofpoll` | `yourapp` |
-| Bundled sidecars | `src-tauri/tauri.conf.json` (`externalBin`) | `binaries/proofpoll-holochain`, `binaries/proofpoll-lair-keystore` | `binaries/yourapp-holochain`, `binaries/yourapp-lair-keystore` |
-| Sidecar resolver calls | `src-tauri/src/conductor.rs` + `src-tauri/src/lair.rs` | `sidecar_path("proofpoll-…")` | `sidecar_path("yourapp-…")` |
-| CI binary download | `.github/workflows/build-release.yml` | downloads to `binaries/proofpoll-{holochain,lair-keystore}-<triple>` | `binaries/yourapp-{holochain,lair-keystore}-<triple>` |
-| DNA names | `dna/*/workdir/dna.yaml` | `proofpoll_v1_*` | `yourapp_v1_*` |
-| Network seeds | `dna/*/workdir/dna.yaml` | `proofpoll-network-v1.*` | `yourapp-network-v1.*` |
-| hApp names | `dna/*/workdir/happ.yaml` | `proofpoll_v1_*_happ` | `yourapp_v1_*_happ` |
-| hApp role | `dna/*/workdir/happ.yaml` | `proofpoll` | `yourapp` |
+This alpha is **not code-signed or notarised**, so macOS Gatekeeper will block it on first open with a warning that it "cannot be opened because the developer cannot be verified." This is expected for an unsigned alpha. To open it:
 
-Then update these Rust constants:
+1. **Right-click** (or Control-click) the Fieldnotes app in Finder.
+2. Choose **Open** from the menu.
+3. In the dialog, click **Open** again.
 
-| File | What to change |
-|---|---|
-| `src-tauri/src/dna.rs` | `APP_ID_V1_*` and `HAPP_FILE_V1_*` constants |
-| `src-tauri/src/commands.rs` | `ROLE_NAME` constant |
-| `src-tauri/src/migration.rs` | `ROLE_NAME` constant |
-| `src-tauri/src/dna.rs` | `"proofpoll"` origin string in WebSocket connects |
+You only need to do this once. (Double-clicking the first time will *not* give you the Open option — you must right-click.) If macOS still refuses, clear the quarantine flag from a terminal: `xattr -dr com.apple.quarantine /Applications/Fieldnotes.app`. Signed builds are planned for a later release.
 
-Update build scripts (`dna/*/build.sh`, `build-all.sh`) — change hApp filenames.
+### First run
 
-**Critical**: The `network_seed` in `dna.yaml` determines which DHT your app joins. Two apps with the same network seed share a DHT. Always use a unique seed.
-
-**Why the sidecar prefix matters**: Tauri installs `externalBin` contents next to the main executable, which on Linux means `/usr/bin/`. Shipping a sidecar called `lair-keystore` there collides with any other Tauri/Holochain app that ships the same — `dpkg` will refuse to install. Prefixing the bundled binaries with your app name keeps your `.deb` (and `.msi`) installable alongside any other Holochain Tauri app, including Flowsta Vault and unmodified ProofPoll.
-
-### Step 2: Replace Entry Types
-
-ProofPoll's data model is polls and votes. Replace these with your own.
-
-**Integrity zome** (latest version, currently `dna/v1.3/zomes/polls/integrity/src/lib.rs`):
-
-```rust
-// REPLACE these with your entry types:
-pub struct Poll { ... }     // → pub struct Review { ... }
-pub struct Vote { ... }     // → pub struct Rating { ... }
-pub struct Flag { ... }     // Keep or adapt for your content type
-
-// KEEP these as-is (infrastructure):
-pub struct MigratedPoll { ... }   // Rename "Poll" to your type but keep the structure
-pub struct EncryptedEntry { ... } // Generic — works for any private data
-```
-
-**Coordinator zome** — replace the zome functions. The patterns are reusable:
-- `create_poll` → `create_review` (same anchor + link pattern)
-- `cast_vote` → `submit_rating` (same one-per-agent enforcement pattern)
-- `get_all_polls` → `get_all_reviews` (same anchor query pattern)
-- `flag_poll` → `flag_review` (same pattern, just rename)
-
-Keep the migration functions and encrypted entry functions — they're generic.
-
-### Step 3: Update Tauri Commands
-
-`src-tauri/src/commands.rs` has mirror types and Tauri commands for each zome function.
-
-**Replace** the poll/vote/flag Rust structs and commands with your own. The pattern is always:
-1. Define a response struct (serializable)
-2. `#[tauri::command]` function that locks the AppWebsocket, encodes payload, calls `call_zome`, decodes result
-
-**Keep** these as-is (infrastructure):
-- `AppState`, `call_zome()`, `try_reenable_app()`, `friendly_error()`, `decode_entry()`
-- `get_app_status`
-- Identity link commands (`commit_identity_link`, `get_identity_link`, etc.)
-- Encrypted entry commands (`save_vote_rationale`, `save_draft_poll`, etc. — adapt names)
-- Migration status commands (`get_migration_status`, `abandon_pending_votes`)
-- The two backup commands (`build_canonical_backup`, `decode_record_for_export`) — each has one `match` arm per entry type; add an arm for every new type you introduce. See [Automatic Backups + Cross-Device Recognition](#automatic-backups--cross-device-recognition) below for the full pattern.
-- `get_export_data` is deprecated and only kept for legacy callers — new forks should ignore it.
-
-**Register new commands** in `src-tauri/src/lib.rs` → `invoke_handler(tauri::generate_handler![...])`.
-
-### Step 4: Update Frontend
-
-**`src/lib/holochain.ts`** — Replace poll/vote/flag TypeScript types and `invoke()` wrappers with your own. Keep the identity, migration, and encrypted entry functions.
-
-**`src/routes/`** — Replace the pages:
-- `index.tsx` → Your content list page
-- `create/index.tsx` → Your content creation form
-- `poll/[id]/index.tsx` → Your content detail page
-
-**Keep as-is:**
-- `layout.tsx` — Conductor startup, header, migration banner (just rename "ProofPoll")
-- `identity/index.tsx` — Flowsta identity linking page
-- `drafts/index.tsx` — Encrypted drafts page (adapt for your draft type)
-- `src/lib/context.ts` — Qwik signals for linked state
-- `src/lib/sanitize.ts` — XSS prevention
-
-### Step 5: Update Migration
-
-`src-tauri/src/migration.rs` exports data from the previous version and re-creates it on the current version. The source client is clearly marked — change one line to point to your previous version's client field.
-
-Replace the entry types and zome function names with your own. The orchestration pattern (export → create → register mapping → cast → retry loop) is identical for any data model.
-
-The state file name is auto-generated from `ACTIVE_APP_ID` — no hardcoded strings to update.
+1. Open Fieldnotes. It starts its own Holochain conductor in the background (give it a moment on first launch).
+2. Go to **Identity** and sign in with Flowsta. This links your identity to the network.
+3. The **Scenarios** board fills in as it syncs from the network. Work through the scenarios — record a verdict, add findings, corroborate what others have hit.
+4. File anything that no scenario covered under **Report**.
 
 ---
 
-## Flowsta Integration Points
+## How it's built
 
-ProofPoll uses [Flowsta](https://flowsta.com) for decentralized identity verification. If you want to use Flowsta in your fork, keep these as-is and just change the client_id. If you want a different identity system (or none), remove them.
+Fieldnotes is a [Tauri](https://tauri.app) desktop app (Rust backend, web frontend) wrapping a [Holochain](https://www.holochain.org) conductor.
 
-> **For the bigger picture** of what Flowsta gives a Holochain app, read [For Holochain Developers](https://docs.flowsta.com/holochain/for-developers) on docs.flowsta.com first. The short version: agent linking is the foundation, but the same SDK also lights up scope-gated user profile data (display name, username, avatar), encrypted Vault backups, cross-device recognition, document signing via Sign It, and CAL §4.2.1-compliant data export — for ~50 more lines of integration code.
+- **Frontend:** Qwik, TypeScript, Tailwind CSS
+- **Backend:** Tauri v2 (Rust), Holochain 0.6.1 (hdi 0.7.0, hdk 0.6.0)
+- **Identity:** Flowsta agent linking
+- **Encryption:** lair (`crypto_box`) wraps the per-administrator attachment keys; `ring` (ChaCha20-Poly1305) encrypts the attachment images themselves
 
-### Setup
+The data model is three DHT entry types: **Item** (a scenario), **Response** (a tester's verdict, one per tester per Item), and **Finding** (an append-only observation, which can carry the encrypted attachments). Scenario creation is gated by a progenitor-signed `AdminGrant` verified at validation time, so a grant cannot be forged. Attachments use a two-stage scheme — the image is encrypted once under a per-attachment key, and only that small key is wrapped to each administrator — which is why adding an administrator later never re-encrypts the image.
 
-1. Register your app at [dev.flowsta.com](https://dev.flowsta.com) to get a `client_id`
-2. Update `.env`: `VITE_FLOWSTA_CLIENT_ID=your_client_id_here`
-3. Clone `flowsta-agent-linking` at `../flowsta-agent-linking/` (referenced by build scripts)
-4. Keep the `agent_linking_integrity` and `agent_linking` zomes in your `dna.yaml`
-5. Update the `appName` parameter in `linkFlowstaIdentity()` calls to your app name (shown in the Vault approval dialog)
-
-### Scopes
-
-Scopes control which Flowsta profile fields your app can access. They are configured per-app at [dev.flowsta.com](https://dev.flowsta.com) and are shown to the user in the Flowsta Vault approval dialog when they first sign in. The Vault enforces them — it only exposes data fields the user actually approved, regardless of what the app requests at runtime.
-
-**ProofPoll requests these scopes:**
-
-| Scope | What it provides | Why ProofPoll uses it |
-|---|---|---|
-| `openid` | Basic identity (implicit) | Required by all apps — not shown to the user |
-| `did` | Decentralized identifier | Unique identity for sybil resistance |
-| `public_key` | Holochain agent pub key | Links the Vault identity to the DHT entry |
-| `holochain` | Holochain identity attestation | Required for `agent_linking` zome ceremony |
-| `display_name` | The user's display name | Shown in the app header and voter chips |
-| `username` | The user's @username | Displayed on the identity page |
-| `profile_picture` | Avatar URL | Shown in the app header and voter chips |
-
-The `display_name`, `username`, and `profile_picture` scopes are optional — ProofPoll requests them for a friendlier UI. If your fork has no use for profile data, remove them from your app's scope configuration at dev.flowsta.com.
-
-**Configuring scopes for your fork:**
-
-1. Register your app at [dev.flowsta.com](https://dev.flowsta.com) and create a new application
-2. In the app settings, select the scopes your app needs
-3. Copy your `client_id` into `.env` as `VITE_FLOWSTA_CLIENT_ID`
-4. The selected scopes are fetched fresh from the Flowsta API each time a user goes through the linking flow, so scope changes take effect immediately — no app rebuild needed
-
-**What the user sees:** The Vault approval dialog lists every scope (except `openid`) in plain language before the user approves. The Vault will only serve those fields on `GET /status` at `localhost:27777`.
-
-### How Identity Works at Runtime
-
-The Flowsta Vault is a separate desktop app that manages the user's identity. Your app communicates with it via HTTP on `localhost:27777`. The key design principle: **the Vault only needs to be running for the initial identity linking ceremony**. After that, your app works independently.
-
-**First launch (new user)**:
-1. User clicks "Sign in with Flowsta" → calls `linkFlowstaIdentity()` from `@flowsta/holochain` SDK
-2. The SDK sends `POST /link-identity` to the Vault → Vault shows approval dialog
-3. Vault signs an attestation with the user's key → returned to your app
-4. Your app commits the `IsSamePersonEntry` on the DHT via the `agent_linking` zome
-5. Identity link data is saved locally (`identity-link.json`)
-6. Display name and profile picture are fetched from Vault and cached locally (`profile-cache.json`)
-
-**Subsequent launches (Vault running or not)**:
-1. App loads `identity-link.json` → knows user was previously linked
-2. App loads `profile-cache.json` → shows display name and avatar immediately
-3. If Vault is running: refreshes profile and updates cache
-4. If Vault is closed/locked: cached data is used — everything works normally
-5. DHT entry is re-created in the background when Vault is available (for peer verification)
-
-**Key files for this flow**:
-- `src/routes/layout.tsx` — Startup link detection, profile cache loading, Vault polling
-- `src-tauri/src/commands.rs` — `get_identity_link`, `get_cached_profile`, `save_profile_cache` commands
-- `src/lib/holochain.ts` — TypeScript wrappers for all identity + profile functions
-
-### Automatic Backups + Cross-Device Recognition
-
-ProofPoll backs up the user's authored data to Flowsta Vault's encrypted local storage every 60 minutes. The backup uses the canonical v1 payload shape — see **[@flowsta/holochain → Backups](https://docs.flowsta.com/sdk/holochain#backups)** on docs.flowsta.com for the full pattern and the **[canonical payload reference](https://docs.flowsta.com/vault/ipc-reference#canonical-backup-payload-v1)** for the on-the-wire schema. Because Vault recognises the shape, it:
-
-- Renders per-entry-type counts on the Your Data page ("12 polls, 38 votes").
-- Inlines the plain-English view of each record into the user's [Cryptographic Autonomy License](https://github.com/holochain/cryptographic-autonomy-license) §4.2.1 data export — the user can take this file to any compatible Holochain app and use it independently.
-
-**Recovery is recognition, not restore.** On a fresh install or a new machine there is no restore step. When the user signs in with Flowsta, the app resolves their full **linked agent set** — every agent key they've used across devices — with a 2-hop walk through the identity link graph (`get_my_agent_set`). Their polls and votes were never lost: they live on the DHT, authored by those agents, and the app recognises them as the user's own no matter which device created them, re-syncing from the network as the conductor warms up. The Vault backup is the user's portable CAL §4.2.1 export — not the recovery path.
-
-**Mechanics:**
-
-- Backups work even when the Vault is locked (after first unlock in the session).
-- Each backup overwrites the "latest" label by default (single live backup; the 10-per-app capacity is there if needed).
-- Only the current user's authored data is backed up (filtered by `action.author == agent_pub_key`).
-- Recognition is read-only — the app reads entries authored by any agent in the user's set; it never re-writes or imports them, so there are no duplicate records or new action hashes.
-
-**Key files:**
-
-- `src/routes/layout.tsx` — the `startAutoBackup()` call.
-- `src-tauri/src/commands.rs` — two backup Tauri commands at the bottom of the file:
-  - `build_canonical_backup` — builds the canonical payload from zome queries (replaces the legacy `get_export_data`, which is kept deprecated for backwards compat).
-  - `decode_record_for_export` — decodes an entry into plain JSON for the human-readable view.
-- `get_my_agent_set` (`commands.rs`) — resolves the user's cross-device agent set for recognition; used by the read paths in `src/lib/holochain.ts`.
-
-**Keeping backups in sync with your data model:** when you add a new entry type to your DNA, add one `match` arm in `decode_record_for_export` and one in `build_canonical_backup`'s record-collection loop. The plumbing — encryption, storage, the Your Data UI, the CAL export — is provided by Flowsta Vault.
-
-**For forks:** the two commands above are the entire backup surface area you maintain. Replace `Poll` / `Vote` with your own entry types. The `appName` parameter in `layout.tsx` controls how your app appears in the Vault's Your Data page.
-
-### Constants reference
-
-| Value | Location | Purpose |
-|---|---|---|
-| `VITE_FLOWSTA_CLIENT_ID` | `.env` | Identifies your app to Flowsta |
-| `http://127.0.0.1:27777` | `layout.tsx`, `identity/index.tsx`, `commands.rs` | Flowsta Vault IPC server |
-| `@flowsta/holochain` | `package.json`, `layout.tsx`, `identity/index.tsx` | Flowsta SDK for identity linking |
-| `flowsta-agent-linking` | `build.sh`, `dna.yaml` | Reusable Rust crate for DHT identity attestations |
-| `"ProofPoll"` in `linkFlowstaIdentity()` | `layout.tsx`, `identity/index.tsx` | App name shown in Vault approval dialog |
-| Port `5174` | `vite.config.ts` | Dev port (avoids conflict with Vault on 5173) |
-| Port `4466` | `conductor.rs` | Admin WS port (avoids conflict with Vault on 4455) |
+The deeper infrastructure (conductor lifecycle, Flowsta integration, DNA migration, the encrypted-data approach) is inherited from ProofPoll largely unchanged; see ProofPoll's documentation and [docs.flowsta.com](https://docs.flowsta.com) for it. Fuller Fieldnotes-specific architecture notes are planned as separate docs.
 
 ---
 
-## DNA Migration
+## Lineage: proof that anyone can build this
 
-This app includes a complete migration system for upgrading between DNA versions. This section explains how it works and how to add your own versions.
+Fieldnotes is a fork of **[ProofPoll](https://github.com/WeAreFlowsta/ProofPoll)** by Flowsta — a verified-polling Holochain app, explicitly built to be forked. ProofPoll solved the genuinely hard parts of a desktop Holochain app (conductor lifecycle, Flowsta identity linking, DNA migration, encrypted private data on a public DHT) so that the next person doesn't have to. Fieldnotes is that fork: the polling substrate became a scenario-testing substrate.
 
-### The Problem
+Flowsta's claim for ProofPoll is that you can build a real, useful Holochain application on top of it **without being a developer**. Fieldnotes is the evidence. It was built by a product owner who does not know any programming language — "usefully ignorant," comfortable at a terminal but not a coder — working with an AI assistant. From forking ProofPoll to shipping this working alpha took **just over 24 hours of elapsed time**, across a couple of sittings (the git history bears this out).
 
-Holochain DNA versions with different integrity zomes (new entry types, changed validation) get different DNA hashes, which means a **new DHT**. Old data lives on the old DHT. Each user runs their own conductor — there's no central server to orchestrate the upgrade.
-
-### The Solution: Anchor-Based Hash Mapping
-
-When a user upgrades to a new version:
-
-1. **Install new version** alongside the old (both stay installed)
-2. **Export** user's authored content and actions from the old DHT
-3. **Re-create** content on the new DHT (entries get new action hashes)
-4. **Publish migration mappings** — a `MigratedPoll` entry linked from a deterministic migration anchor maps old hashes to new hashes
-5. **Re-cast actions** (votes, etc.) where the target content's mapping exists
-6. **Queue pending actions** for content whose authors haven't upgraded yet
-7. **Background retry** — every 60 seconds, check if new mappings appeared and retry
-
-Other users discover the mappings via `get_links` on the migration anchor. As more users upgrade, the new DHT fills up via gossip.
-
-### Three Tiers of Holochain App Upgrades
-
-| Tier | When | Migration Needed? | Example |
-|---|---|---|---|
-| **1. Coordinator-only** | Bug fixes, new queries, new link traversals | No — use `admin.updateCoordinators()` | Fix a query bug |
-| **2. Additive integrity** | New entry types, new link types | Yes — new DNA hash, new DHT | Adding EncryptedEntry (v1.3) |
-| **3. Breaking integrity** | Changed validation, restructured entries | Yes — with data transformation | Restructuring Poll fields |
-
-**~70% of real-world upgrades are Tier 1** (no migration needed). Tier 2 is what ProofPoll demonstrates across v1.0→v1.3. Tier 3 follows the same pattern but adds a transformation step.
-
-### Votes Survive Migration
-
-During migration, polls from older versions remain visible and functional:
-
-- `get_all_polls` queries ALL installed versions and deduplicates using migration mappings
-- Each poll carries a `dna_version` field so votes and flags are routed to the correct cell
-- If a poll author hasn't migrated, their poll stays on the old DHT — votes cast on it go to the old cell
-- Once the author migrates, the old copy is hidden and the new copy takes over
-
-No votes are ever lost. Users on different versions can still interact with content on the version where it lives.
-
-### Migration Key Files
-
-| File | Purpose |
-|---|---|
-| `src-tauri/src/migration.rs` | Migration orchestration (export, import, retry loop). Source client clearly marked for forkers |
-| `src-tauri/src/dna.rs` | Multi-version install, AppWebsocket setup per version |
-| `src-tauri/src/commands.rs` | `get_all_polls` multi-version merge with chained dedup |
-| `dna/v1.3/zomes/polls/coordinator/src/lib.rs` | `register_migrated_poll`, `get_migration_mapping` zome functions |
-| `dna/v1.3/zomes/polls/integrity/src/lib.rs` | `MigratedPoll` entry type, `MigrationIndex` link type |
-
-### Adding Your Own Version
-
-1. **Create `dna/vX.Y/`** — copy the latest version, update `network_seed` in `dna.yaml`
-2. **Add your integrity changes** — new entry types, link types, validation
-3. **Update coordinator** — keep all migration + encrypted entry functions, add your new zome functions
-4. **Update `src-tauri/src/dna.rs`** — add `APP_ID_VX_Y`, `HAPP_FILE_VX_Y`, update `ACTIVE_APP_ID`, add `app_client_vX_Y` to `AppState`
-5. **Update `src-tauri/src/migration.rs`** — change the source client field (one line, clearly marked with `// FORKING`)
-6. **Update `src-tauri/src/commands.rs`** — add your previous version to the `older_versions` array in `get_all_polls`
-7. **Update `build-all.sh`** — add the new build step
-8. **Test** — create data on the old version, upgrade, verify migration completes and all content is visible
-
-The migration state file is auto-generated from `ACTIVE_APP_ID` — no hardcoded strings to update.
-
-### Staying Visible During Migration
-
-During a migration all DNA cells are active simultaneously. `get_all_polls` queries every installed version and deduplicates:
-
-1. **Collect migration mappings** from ALL versions into one set (chains across multi-hop migrations)
-2. **Query each version** — skip any poll whose hash appears in the migrated set
-3. **Return merged list** — each item carries `dna_version` so votes and flags are routed to the correct cell
-
-This means content is never missing from the UI, even if only one user on the network has upgraded so far.
-
-### Migration Edge Cases
-
-- **First user on new version**: Their own content migrates fine. References to others' content go to pending (retried every 60s).
-- **Content author never upgrades**: Content stays on the old DHT and remains visible. Actions (votes) cast on it go to the old cell. Users can "abandon pending votes" to clean up.
-- **Crash during migration**: State file is written after each entry. Restart picks up where it left off.
-- **Fresh install (no previous version)**: Installs latest directly. No migration needed.
+The headline is not *who* built it. It is *who can*. If someone who can't write code can produce a usable peer-to-peer application on this foundation, the barrier everyone assumed stood between an idea and a shipped hApp is lower than it looks. A companion guide — *building on ProofPoll as a non-developer* — is planned to turn this proof into a path others can follow.
 
 ---
 
-## Reusable Infrastructure
+## Running your own network
 
-These files work for **any** Holochain + Tauri app with zero or minimal changes:
+Fieldnotes inherits ProofPoll's fork-friendliness. To run it for your own testing on a separate network where you are the administrator, build from source and change two things in `dna/v1.3/workdir/dna.yaml` first:
 
-| File | What It Does | Change Needed |
-|---|---|---|
-| `src-tauri/src/conductor.rs` | Starts lair-keystore + holochain conductor, waits for readiness, health monitoring | Change ports if running multiple apps |
-| `src-tauri/src/lair.rs` | Lair keystore init, socket management, passphrase | None |
-| `src-tauri/src/crypto.rs` | Encrypt/decrypt via lair's xsalsa20poly1305 crypto_box | None |
-| `src-tauri/src/dna.rs` | Multi-version DNA install, AppWebsocket per version, signing credentials with CellDisabled recovery | Change app IDs and hApp filenames |
-| `src-tauri/src/migration.rs` | Migration state machine, export/import/retry pattern. Auto-versioned state file | Change entry types, zome names, and source client field |
-| `src/lib/context.ts` | Qwik signals for linked/display state | None |
-| `src/lib/sanitize.ts` | XSS prevention for user content | None |
-| `src/routes/identity/` | Flowsta identity linking UI | None (if using Flowsta) |
+1. **The network seed** (`network_seed`) determines *which network you join* — everyone who builds with the same seed shares a DHT. Change it to a unique value for an independent network.
+2. **The progenitor key** (`progenitor_pubkey`) determines *who can administer that network*. Set it to your own stable Flowsta Vault key (shown on the Identity screen) and only you can issue valid administrator grants. Leaving it null runs the gate in permissive mode (fine for a trusted alpha, not for an open network).
+
+Both values are baked into the build, so a distributed binary is the boundary: people you give it to join *your* network as members and cannot become administrators. The build toolchain (Rust, the Holochain/lair binaries, the `hc` CLI, Node) and the `build-all.sh` / `cargo tauri build` flow are inherited from ProofPoll — see its README.
 
 ---
 
-## Network Infrastructure (Bootstrap & Signaling)
+## A note on the alpha's gates
 
-Holochain apps need a **bootstrap server** for peer discovery, a **signaling
-server** for NAT traversal, and an **Iroh relay** for connections that NAT
-defeats. As of Holochain 0.6.1 all three are handled by the same binary
-(`kitsune2-bootstrap-srv` ≥ v0.4.1).
+Fieldnotes is honest about what it does and doesn't enforce yet:
 
-The bootstrap / signal / relay URLs and an optional bootstrap auth
-material are read **at compile time** from env vars by
-[`src-tauri/src/conductor.rs`](src-tauri/src/conductor.rs) — set them
-before `cargo tauri build` (locally) or as GitHub Actions secrets
-(in CI). Three deployment modes:
+- **Membership** is not cryptographically gated in this alpha. Anyone with the binary can join the network; access is limited by *distribution* (the binary goes to invited testers), not by a join membrane. A Flowsta-keyed membrane is future work.
+- **Administration** runs in permissive mode in the shipped alpha (proven in development, not enforced by a burned-in progenitor key). Vault-keyed enforcement is the headline hardening for the next release.
+- **Attachment encryption** protects attached images from non-administrators, but its crypto is new and unaudited (see [What's New](#whats-new)). Treat it as alpha-grade defence-in-depth, not a guarantee. Finding *text* is public by design and only advisory-checked for accidental private data.
 
-### A. Quick start (default, no setup required)
-
-Don't set any env vars. The source defaults take effect:
-
-| Var | Default | Notes |
-|---|---|---|
-| `PROOFPOLL_BOOTSTRAP_URL` | `https://dev-test-bootstrap2.holochain.org` | Holochain's public dev bootstrap. No SLA. |
-| `PROOFPOLL_SIGNAL_URL` | `wss://dev-test-bootstrap2.holochain.org` | Same host. |
-| `PROOFPOLL_RELAY_URL` | `https://use1-1.relay.n0.iroh-canary.iroh.link./` | Iroh's public canary relay. |
-| `PROOFPOLL_AUTH_MATERIAL` | _(unset)_ | No auth (open bootstrap). |
-
-`cargo tauri dev` and casual experimentation work out of the box.
-
-### B. Self-hosted bootstrap
-
-Run your own `kitsune2-bootstrap-srv` (see the official Holochain guide:
-[Running Network Infrastructure](https://developer.holochain.org/resources/howtos/running-network-infrastructure/))
-and set:
-
-```bash
-PROOFPOLL_BOOTSTRAP_URL=https://your-bootstrap.example.com  \
-PROOFPOLL_SIGNAL_URL=wss://your-bootstrap.example.com       \
-PROOFPOLL_RELAY_URL=https://your-bootstrap.example.com./    \
-  cargo tauri build
-```
-
-The trailing-dot+slash on `relay_url` (`./`) is required canonical form.
-
-### C. Flowsta-hosted bootstrap (what the official ProofPoll binary uses)
-
-Once Flowsta opens bootstrap-as-a-service, register your app at
-<https://dev.flowsta.com>, get a `client_id`, then set:
-
-```bash
-PROOFPOLL_BOOTSTRAP_URL=https://bootstrap.flowsta.com                       \
-PROOFPOLL_SIGNAL_URL=wss://bootstrap.flowsta.com                            \
-PROOFPOLL_RELAY_URL=https://bootstrap.flowsta.com./                         \
-PROOFPOLL_AUTH_MATERIAL=<base64url of `{"client_id":"flowsta_app_..."}`>    \
-  cargo tauri build
-```
-
-`PROOFPOLL_AUTH_MATERIAL` is opaque bytes sent verbatim to the
-bootstrap's `/authenticate` endpoint. The kitsune2 client caches the
-returned token and re-auths on 401 automatically. Without the material,
-Flowsta's bootstrap returns 401 and peering fails.
-
-### Notes for CI
-
-The included [`.github/workflows/build-release.yml`](.github/workflows/build-release.yml)
-reads `PROOFPOLL_BOOTSTRAP_URL`, `PROOFPOLL_SIGNAL_URL`,
-`PROOFPOLL_RELAY_URL`, and `PROOFPOLL_AUTH_MATERIAL` from repository
-secrets and exposes them to the build. If none are set (e.g. a fresh
-fork), the release falls back to the development defaults above.
+These are deliberate choices for an early alpha on public test data, not oversights — and they map the hardening path toward R&O's heavier model.
 
 ---
 
-## Project Structure
+## Licence
 
-```
-ProofPoll/
-├── dna/                        # Holochain DNA source
-│   ├── zomes/polls/            # v1.0 zomes
-│   │   ├── integrity/src/      #   Entry types, validation
-│   │   └── coordinator/src/    #   Zome functions (CRUD)
-│   ├── workdir/                # v1.0 manifests (dna.yaml, happ.yaml)
-│   ├── build.sh                # v1.0 build script
-│   ├── v1.1/                   # v1.1 DNA (+ flags, migration)
-│   ├── v1.2/                   # v1.2 DNA (+ public/anonymous polls)
-│   └── v1.3/                   # v1.3 DNA (+ encrypted private data)
-│       ├── zomes/polls/
-│       │   ├── integrity/src/  #   EncryptedEntry, VoteToRationale, AgentDrafts
-│       │   └── coordinator/src/#   Encrypted entry CRUD + existing functions
-│       ├── workdir/            #   v1.3 manifests
-│       └── build.sh            #   v1.3 build script
-├── src-tauri/                  # Tauri v2 Rust backend
-│   ├── Cargo.toml              #   Rust dependencies
-│   ├── tauri.conf.json         #   App config (name, bundle ID, ports)
-│   ├── resources/              #   Built .happ bundles (v1.0 through v1.3)
-│   └── src/
-│       ├── commands.rs         #   Tauri commands (app + flags + encrypted entries + migration)
-│       ├── conductor.rs        #   Conductor lifecycle management
-│       ├── crypto.rs           #   Lair-based encryption (xsalsa20poly1305)
-│       ├── dna.rs              #   Multi-version DNA install + WebSocket setup
-│       ├── migration.rs        #   DNA migration orchestration
-│       ├── lair.rs             #   Lair keystore management
-│       └── lib.rs              #   App setup, command registration, startup
-├── src/                        # Qwik TypeScript frontend
-│   ├── lib/
-│   │   ├── holochain.ts        #   Zome call wrappers + types
-│   │   ├── context.ts          #   Qwik context signals
-│   │   └── sanitize.ts         #   Input sanitization
-│   └── routes/
-│       ├── layout.tsx          #   Header, conductor status, migration banner
-│       ├── index.tsx           #   Content list (+ flag filtering)
-│       ├── poll/[id]/          #   Content detail (+ flag + vote rationale)
-│       ├── create/             #   Content creation form (+ save as draft)
-│       ├── drafts/             #   Encrypted draft polls page
-│       └── identity/           #   Flowsta identity linking
-├── .env                        # VITE_FLOWSTA_CLIENT_ID
-├── build-all.sh                # Build all DNA versions
-├── package.json                # Node dependencies
-└── vite.config.ts              # Vite + Qwik config (dev port 5174)
-```
+Fieldnotes is licensed under the **[Cryptographic Autonomy License version 1.0](LICENSE)** (CAL-1.0).
 
-## License
+It derives from **ProofPoll**, which is licensed under the **MIT License** — preserved verbatim in [`LICENSE.MIT`](LICENSE.MIT). The MIT License permits this relicensing provided the original notice is retained, which it is. See [`NOTICE`](NOTICE) for the full attribution and the split of what is whose.
 
-MIT
+  - Portions derived from ProofPoll: © 2026 ProofPoll contributors (MIT)
+  - Portions original to Fieldnotes: © 2026 happenings community (CAL-1.0)
