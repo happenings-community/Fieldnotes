@@ -116,15 +116,8 @@ pub fn run() {
                 .await
                 {
                     Ok(result) => {
-                        log::info!("Conductor started, agent: {}", result.agent_key);
+                        log::info!("Conductor ready, awaiting network choice");
 
-                        // The Windows console-hide threads briefly steal focus
-                        // away from the main ProofPoll window when they
-                        // ShowWindow(SW_HIDE) the conhost windows. Re-raise our
-                        // main window after the hide threads have settled
-                        // (their 3 s budget runs in parallel with conductor
-                        // init — by the time we reach this point they're done).
-                        // No-op on non-Windows platforms.
                         #[cfg(target_os = "windows")]
                         {
                             use tauri::Manager;
@@ -134,75 +127,24 @@ pub fn run() {
                         }
 
                         let admin_port = result.handle.admin_port;
-                        let app_port = result.handle.app_port;
                         let conductor_pid = result.handle.conductor_pid;
-                        let needs_migration = result.needs_migration;
-                        let v1_2_available = result.app_client_v1_2.is_some();
 
+                        // PHASE 1: store conductor handle + lair client only. No
+                        // DNA installed yet; the user chooses a network first.
+                        // Agent key, app clients and app_port are set in phase 2
+                        // (install_network) after that choice.
                         *startup_state.conductor_handle.lock().unwrap() = Some(result.handle);
-                        *startup_state.agent_pub_key.lock().unwrap() = Some(result.agent_key);
-                        *startup_state.app_client.lock().await = Some(result.app_client);
-                        *startup_state.app_client_v1_2.lock().await = result.app_client_v1_2;
-                        *startup_state.app_client_v1_1.lock().await = result.app_client_v1_1;
-                        *startup_state.app_client_v1_0.lock().await = result.app_client_v1_0;
                         *startup_state.lair_client.lock().await = Some(result.lair_client);
                         *startup_state.conductor_status.lock().unwrap() =
-                            conductor::ConductorStatus::Ready { admin_port, app_port };
+                            conductor::ConductorStatus::AwaitingNetwork { admin_port };
 
-                        // Start background health monitor
                         conductor::spawn_health_monitor(
                             conductor_pid,
                             startup_state.clone(),
                             monitor_handle,
                         );
 
-                        // Run migration if the previous version is installed and
-                        // migration hasn't completed yet.
-                        let should_migrate = needs_migration || {
-                            let ms = startup_state.migration_state.lock().await;
-                            v1_2_available
-                                && ms.status != migration::MigrationStatus::Complete
-                        };
-                        if should_migrate {
-                            let migration_state = startup_state.clone();
-                            tauri::async_runtime::spawn(async move {
-                                log::info!("Starting migration to {}...", dna::ACTIVE_APP_ID);
-                                match migration::run_migration(
-                                    &migration_state,
-                                    &migration_handle,
-                                )
-                                .await
-                                {
-                                    Ok(()) => {
-                                        log::info!("Migration completed successfully");
-                                        // Start retry loop for pending votes
-                                        migration::spawn_migration_retry_loop(
-                                            migration_state,
-                                            migration_handle,
-                                        );
-                                    }
-                                    Err(e) => {
-                                        log::error!("Migration failed: {}", e);
-                                        let mut ms = migration_state.migration_state.lock().await;
-                                        ms.status = migration::MigrationStatus::Error(e);
-                                        ms.save(&migration_state.data_dir);
-                                    }
-                                }
-                            });
-                        } else {
-                            // Check if there are pending votes from a previous run
-                            let has_pending = {
-                                let ms = startup_state.migration_state.lock().await;
-                                !ms.votes_pending.is_empty()
-                            };
-                            if has_pending {
-                                let retry_state = startup_state.clone();
-                                migration::spawn_migration_retry_loop(
-                                    retry_state,
-                                    migration_handle,
-                                );
-                            }
-                        }
+                        let _ = &migration_handle;
                     }
                     Err(e) => {
                         log::error!("Failed to start conductor: {}", e);
@@ -219,6 +161,8 @@ pub fn run() {
             commands::get_app_status,
             commands::launch_vault,
             commands::app_environment,
+            commands::install_network,
+            commands::get_network_info,
             // ── Fieldnotes: scenarios / responses / findings ──────
             commands::create_item,
             commands::import_items,

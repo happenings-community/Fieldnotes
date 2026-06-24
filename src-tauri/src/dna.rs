@@ -20,7 +20,8 @@ use holochain_client::{
     IssueAppAuthenticationTokenPayload,
 };
 use holochain_types::app::AppBundleSource;
-use holochain_types::prelude::AgentPubKey;
+use holochain_types::prelude::{AgentPubKey, DnaModifiersOpt, RoleSettings, YamlProperties};
+use std::collections::HashMap;
 use std::path::Path;
 
 // ── Version constants ─────────────────────────────────────────────────
@@ -65,6 +66,8 @@ pub struct InstallResult {
 pub async fn install_dnas(
     admin_port: u16,
     resource_dir: &Path,
+    network_seed: &str,
+    progenitor_pubkey: &str,
 ) -> Result<InstallResult, String> {
     let admin_ws = AdminWebsocket::connect(
         format!("localhost:{}", admin_port),
@@ -183,12 +186,36 @@ pub async fn install_dnas(
         }
 
         log::info!("Installing ProofPoll v1.3 DNA from {:?}...", happ_path);
+        // Path C: inject the user-chosen network seed + progenitor pubkey as DNA
+        // modifiers for the `proofpoll` role. This yields a DNA hash unique to
+        // this (seed, progenitor) pair — a self-sovereign network the running
+        // user can be progenitor of (create-your-own) or join (via invite).
+        let progenitor_props = YamlProperties::new(serde_yaml::Value::Mapping({
+            let mut m = serde_yaml::Mapping::new();
+            m.insert(
+                serde_yaml::Value::String("progenitor_pubkey".to_string()),
+                serde_yaml::Value::String(progenitor_pubkey.to_string()),
+            );
+            m
+        }));
+        let mut roles_settings: HashMap<String, RoleSettings> = HashMap::new();
+        roles_settings.insert(
+            "proofpoll".to_string(),
+            RoleSettings::Provisioned {
+                membrane_proof: None,
+                modifiers: Some(DnaModifiersOpt {
+                    network_seed: Some(network_seed.to_string()),
+                    properties: Some(progenitor_props),
+                }),
+            },
+        );
+
         let payload = InstallAppPayload {
             source: AppBundleSource::Path(happ_path),
             agent_key,
             installed_app_id: Some(APP_ID_V1_3.to_string()),
             network_seed: None,
-            roles_settings: None,
+            roles_settings: Some(roles_settings),
             ignore_genesis_failure: false,
         };
 

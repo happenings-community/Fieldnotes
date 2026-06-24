@@ -5,6 +5,7 @@ import {
   $,
 } from "@builder.io/qwik";
 import { Link } from "@builder.io/qwik-city";
+import { invoke } from "@tauri-apps/api/core";
 import {
   addAdministrator,
   signViaVault,
@@ -29,6 +30,10 @@ export default component$(() => {
   const archivedLoading = useSignal(true);
   const unarchivingHash = useSignal<string | null>(null);
   const archivedError = useSignal<string | null>(null);
+  // Invite generation (Path C): share this network with people you want to join.
+  const inviteString = useSignal<string | null>(null);
+  const inviteError = useSignal<string | null>(null);
+  const inviteCopied = useSignal(false);
 
   // Load admin status, the admin list, and the archived scenarios.
   useVisibleTask$(async () => {
@@ -90,6 +95,38 @@ export default component$(() => {
       archivedError.value = `Failed to unarchive: ${e}`;
     } finally {
       unarchivingHash.value = null;
+    }
+  });
+
+  // Build a shareable invite for THIS network. Reads the installed DNA's
+  // seed + progenitor live (correct across relaunches), then encodes them as
+  // fieldnotes://join?seed=...&progenitor=... and copies to the clipboard.
+  const generateInvite$ = $(async () => {
+    inviteError.value = null;
+    inviteCopied.value = false;
+    try {
+      const info = await invoke<{ network_seed: string; progenitor_pubkey: string | null }>(
+        "get_network_info",
+      );
+      if (!info.progenitor_pubkey) {
+        inviteError.value =
+          "This network has no progenitor, so there is no admin to invite people on its behalf.";
+        return;
+      }
+      const invite =
+        "fieldnotes://join?seed=" +
+        encodeURIComponent(info.network_seed) +
+        "&progenitor=" +
+        encodeURIComponent(info.progenitor_pubkey);
+      inviteString.value = invite;
+      try {
+        await navigator.clipboard.writeText(invite);
+        inviteCopied.value = true;
+      } catch {
+        // Clipboard may be unavailable; the string is shown for manual copy.
+      }
+    } catch (e) {
+      inviteError.value = e instanceof Error ? e.message : String(e);
     }
   });
 
@@ -182,6 +219,41 @@ export default component$(() => {
                 </li>
               ))}
             </ul>
+          )}
+        </section>
+
+        {/* ── Invite people to this network ─────────────────────────── */}
+        <section class="mb-12">
+          <h2 class="text-xl font-bold mb-1">Invite people to this network</h2>
+          <p class="text-sm text-gray-400 mb-4">
+            Share this invite with anyone you want to join your network. They
+            paste it on their first run to join as a member.
+          </p>
+          <button
+            type="button"
+            onClick$={generateInvite$}
+            class="bg-indigo-600 hover:bg-indigo-500 text-white font-medium px-4 py-2 rounded-lg text-sm"
+          >
+            Generate invite
+          </button>
+          {inviteError.value && (
+            <p class="text-red-400 text-sm mt-3">{inviteError.value}</p>
+          )}
+          {inviteString.value && (
+            <div class="mt-4">
+              <input
+                type="text"
+                readOnly
+                value={inviteString.value}
+                onClick$={(_, el) => el.select()}
+                class="w-full bg-gray-800 border border-gray-700 rounded-md px-3 py-2 text-xs text-gray-200 font-mono"
+              />
+              <p class="text-xs text-gray-500 mt-1">
+                {inviteCopied.value
+                  ? "Copied to clipboard."
+                  : "Click to select, then copy."}
+              </p>
+            </div>
           )}
         </section>
 

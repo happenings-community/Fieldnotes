@@ -25,6 +25,7 @@ interface AppStatus {
   conductor_status:
     | { status: "stopped" }
     | { status: "starting"; message: string }
+    | { status: "awaiting_network"; admin_port: number }
     | { status: "ready"; admin_port: number; app_port: number }
     | { status: "error"; message: string };
 }
@@ -49,6 +50,10 @@ export default component$(() => {
   const showSignIn = useSignal(false);
   const migration = useSignal<MigrationState | null>(null);
   const migrationDismissed = useSignal(false);
+  // Network-selection (Path C): create-your-own or join-by-invite state.
+  const networkBusy = useSignal(false);
+  const networkError = useSignal<string | null>(null);
+  const inviteText = useSignal("");
   const disconnecting = useSignal(false);
 
   useVisibleTask$(({ cleanup }) => {
@@ -360,6 +365,76 @@ export default component$(() => {
     }
   });
 
+  // Path C — create a brand-new network: this device's durable Flowsta key
+  // becomes the network's progenitor (its sole admin authority), with a fresh
+  // random network seed. Installs via the two-phase install_network command.
+  const createNetwork$ = $(async () => {
+    networkError.value = null;
+    networkBusy.value = true;
+    try {
+      const resp = await fetch("http://127.0.0.1:27777/status", {
+        method: "GET",
+      });
+      if (!resp.ok) {
+        throw new Error("Flowsta Vault is not responding. Open Vault and try again.");
+      }
+      const data = await resp.json();
+      const progenitor = data?.agent_pub_key as string | undefined;
+      if (!progenitor) {
+        throw new Error("Could not read your Flowsta identity. Is Vault signed in?");
+      }
+      const seed = `fieldnotes-${crypto.randomUUID()}`;
+      await invoke("install_network", {
+        networkSeed: seed,
+        progenitorPubkey: progenitor,
+      });
+      // Success: backend emits starting -> ready; the status poller takes over.
+    } catch (e) {
+      networkError.value = e instanceof Error ? e.message : String(e);
+      networkBusy.value = false;
+    }
+  });
+
+  // Path C — join an existing network from an invite string of the form
+  // fieldnotes://join?seed=...&progenitor=uhCAk...  Both the seed and the
+  // progenitor must match the network's, or the DNA hash won't match.
+  const joinNetwork$ = $(async () => {
+    networkError.value = null;
+    const raw = inviteText.value.trim();
+    if (!raw) {
+      networkError.value = "Paste an invite string first.";
+      return;
+    }
+    let seed: string | null = null;
+    let progenitor: string | null = null;
+    try {
+      const url = new URL(raw);
+      seed = url.searchParams.get("seed");
+      progenitor = url.searchParams.get("progenitor");
+    } catch {
+      networkError.value = "That doesn't look like a valid invite string.";
+      return;
+    }
+    if (!seed || !progenitor) {
+      networkError.value = "Invite is missing the network seed or progenitor.";
+      return;
+    }
+    if (!progenitor.startsWith("uhCAk")) {
+      networkError.value = "Invite progenitor key looks malformed.";
+      return;
+    }
+    networkBusy.value = true;
+    try {
+      await invoke("install_network", {
+        networkSeed: seed,
+        progenitorPubkey: progenitor,
+      });
+    } catch (e) {
+      networkError.value = e instanceof Error ? e.message : String(e);
+      networkBusy.value = false;
+    }
+  });
+
   const handleReconnect = $(() => {
     setSignInIntent({ autoLink: true });
     nav("/identity/");
@@ -492,6 +567,61 @@ export default component$(() => {
             <div class="text-gray-400">Connecting...</div>
           </div>
         ) : !status.value.ready ? (
+          status.value.conductor_status.status === "awaiting_network" ? (
+            <div class="flex flex-col items-center justify-center min-h-[60vh] gap-6 max-w-lg mx-auto">
+              <div class="text-center">
+                <h2 class="text-2xl font-bold text-white mb-2">Set up your Fieldnotes network</h2>
+                <p class="text-gray-400 text-sm">
+                  Create your own network (you become its admin), or join one
+                  you've been invited to.
+                </p>
+              </div>
+
+              {networkError.value && (
+                <div class="w-full bg-red-900/30 border border-red-800/50 rounded-lg px-4 py-2 text-sm text-red-300">
+                  {networkError.value}
+                </div>
+              )}
+
+              <div class="w-full bg-gray-800/50 border border-gray-700 rounded-lg p-5">
+                <h3 class="text-white font-semibold mb-1">Create your own network</h3>
+                <p class="text-gray-400 text-xs mb-4">
+                  Your Flowsta identity becomes this network's progenitor — the
+                  sole admin. A fresh network is generated just for you.
+                </p>
+                <button
+                  type="button"
+                  disabled={networkBusy.value}
+                  onClick$={createNetwork$}
+                  class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white px-5 py-2 rounded-full text-sm font-medium"
+                >
+                  {networkBusy.value ? "Setting up..." : "Create my network"}
+                </button>
+              </div>
+
+              <div class="w-full bg-gray-800/50 border border-gray-700 rounded-lg p-5">
+                <h3 class="text-white font-semibold mb-1">Join a network</h3>
+                <p class="text-gray-400 text-xs mb-3">
+                  Paste an invite string from a network's admin.
+                </p>
+                <textarea
+                  value={inviteText.value}
+                  onInput$={(_, el) => (inviteText.value = el.value)}
+                  placeholder="fieldnotes://join?seed=...&progenitor=uhCAk..."
+                  rows={3}
+                  class="w-full bg-gray-900 border border-gray-700 rounded-md px-3 py-2 text-sm text-gray-200 placeholder-gray-600 font-mono mb-3"
+                />
+                <button
+                  type="button"
+                  disabled={networkBusy.value}
+                  onClick$={joinNetwork$}
+                  class="bg-gray-700 hover:bg-gray-600 disabled:opacity-50 text-white px-5 py-2 rounded-full text-sm font-medium"
+                >
+                  {networkBusy.value ? "Joining..." : "Join network"}
+                </button>
+              </div>
+            </div>
+          ) : (
           <div class="flex flex-col items-center justify-center h-64 gap-4">
             {status.value.conductor_status.status === "error" ? (
               <>
@@ -529,6 +659,7 @@ export default component$(() => {
               </>
             )}
           </div>
+          )
         ) : (
           <>
             {migration.value && !migrationDismissed.value && (

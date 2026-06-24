@@ -2485,3 +2485,97 @@ struct EncryptedAttachmentData {
     #[allow(dead_code)]
     pub created_at: i64,
 }
+
+
+/// PHASE 2 startup command: install the user's chosen network and wire the app.
+///
+/// Called by the frontend after the create/join choice on the AwaitingNetwork
+/// screen. `network_seed` + `progenitor_pubkey` become the DNA modifiers, so
+/// the running user is either that network's progenitor (create-your-own) or a
+/// member joining via an invite string. Resolves the resource dir the same way
+/// as startup (debug: source resources/, release: bundled resources/).
+#[tauri::command]
+pub async fn install_network(
+    app_handle: tauri::AppHandle,
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    network_seed: String,
+    progenitor_pubkey: String,
+) -> Result<(), String> {
+    use tauri::Manager;
+
+    #[cfg(debug_assertions)]
+    let resource_dir = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("resources");
+    #[cfg(not(debug_assertions))]
+    let resource_dir = app_handle
+        .path()
+        .resource_dir()
+        .map_err(|e| format!("Failed to get resource directory: {e}"))?
+        .join("resources");
+
+    let app_state = std::sync::Arc::clone(&state);
+    crate::conductor::install_network(
+        app_handle.clone(),
+        resource_dir,
+        network_seed,
+        progenitor_pubkey,
+        app_state,
+    )
+    .await
+}
+
+
+/// Network info for invite generation (Path C). Reads the INSTALLED DNA's
+/// modifiers live from the conductor — not a cached value — so it is correct
+/// across relaunches. Returns the network seed + progenitor pubkey of the
+/// currently installed network, which the frontend turns into an invite string.
+#[derive(serde::Serialize)]
+pub struct NetworkInfo {
+    pub network_seed: String,
+    pub progenitor_pubkey: Option<String>,
+}
+
+#[tauri::command]
+pub async fn get_network_info() -> Result<NetworkInfo, String> {
+    use holochain_client::AdminWebsocket;
+    use holochain_types::prelude::YamlProperties;
+
+    let admin_ws = AdminWebsocket::connect(
+        format!("localhost:{}", crate::conductor::ADMIN_WS_PORT),
+        Some("proofpoll".to_string()),
+    )
+    .await
+    .map_err(|e| format!("Admin WS connect failed: {e}"))?;
+
+    let cell_ids = admin_ws
+        .list_cell_ids()
+        .await
+        .map_err(|e| format!("list_cell_ids failed: {e}"))?;
+    let cell_id = cell_ids
+        .into_iter()
+        .next()
+        .ok_or("No installed cell — no network to describe")?;
+
+    let dna_def = admin_ws
+        .get_dna_definition(cell_id)
+        .await
+        .map_err(|e| format!("get_dna_definition failed: {e}"))?;
+
+    let network_seed = dna_def.modifiers.network_seed.clone();
+
+    // Decode the progenitor from the DNA properties (SerializedBytes ->
+    // YamlProperties -> yaml mapping -> progenitor_pubkey).
+    let progenitor_pubkey = match YamlProperties::try_from(dna_def.modifiers.properties.clone()) {
+        Ok(props) => {
+            let val = props.into_inner();
+            val.get("progenitor_pubkey")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string())
+        }
+        Err(_) => None,
+    };
+
+    Ok(NetworkInfo {
+        network_seed,
+        progenitor_pubkey,
+    })
+}

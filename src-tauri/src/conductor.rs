@@ -104,7 +104,9 @@ pub struct ConductorHandle {
     pub lair_child: Child,
     pub conductor_child: Child,
     pub admin_port: u16,
-    pub app_port: u16,
+    /// App interface port. None until a network is installed (phase 2);
+    /// set by install_network once setup_app_interface has attached it.
+    pub app_port: Option<u16>,
     pub conductor_pid: u32,
 }
 
@@ -134,6 +136,8 @@ pub enum ConductorStatus {
     Stopped,
     #[serde(rename = "starting")]
     Starting { message: String },
+    #[serde(rename = "awaiting_network")]
+    AwaitingNetwork { admin_port: u16 },
     #[serde(rename = "ready")]
     Ready { admin_port: u16, app_port: u16 },
     #[serde(rename = "error")]
@@ -346,6 +350,14 @@ pub struct StartupResult {
     pub needs_migration: bool,
 }
 
+/// Result of PHASE 1 of startup: conductor + lair running, admin WS ready, but
+/// NO app/DNA installed yet. The user chooses a network (create-your-own as
+/// progenitor, or join via invite) before phase 2 (install_network) runs.
+pub struct ConductorReady {
+    pub handle: ConductorHandle,
+    pub lair_client: lair_keystore_api::prelude::LairClient,
+}
+
 /// Public entry point. Runs one full startup; on failure, performs the
 /// right recovery for the error class and retries once.
 ///
@@ -370,7 +382,7 @@ pub async fn start_holochain(
     data_dir: PathBuf,
     resource_dir: PathBuf,
     passphrase: String,
-) -> Result<StartupResult, String> {
+) -> Result<ConductorReady, String> {
     let first_err = match start_holochain_attempt(
         app_handle.clone(),
         data_dir.clone(),
@@ -427,7 +439,7 @@ async fn start_holochain_attempt(
     data_dir: PathBuf,
     resource_dir: PathBuf,
     passphrase: String,
-) -> Result<StartupResult, String> {
+) -> Result<ConductorReady, String> {
     let _ = app_handle.emit(
         "conductor-status",
         ConductorStatus::Starting {
@@ -535,29 +547,64 @@ async fn start_holochain_attempt(
         fail_with_lair_cleanup!(e);
     }
 
-    // 7. Install ProofPoll DNA.
+    // PHASE 1 COMPLETE: conductor + lair up, admin WS ready. No DNA installed
+    // here — the user chooses a network first (create-your-own as progenitor,
+    // or join via invite); install happens in phase 2 (install_network).
+    let conductor_pid = conductor_child.id();
+    let handle = ConductorHandle {
+        lair_child,
+        conductor_child,
+        admin_port: ADMIN_WS_PORT,
+        app_port: None,
+        conductor_pid,
+    };
+
+    let _ = app_handle.emit(
+        "conductor-status",
+        ConductorStatus::AwaitingNetwork {
+            admin_port: ADMIN_WS_PORT,
+        },
+    );
+    log::info!(
+        "Holochain conductor ready, awaiting network choice (admin: {})",
+        ADMIN_WS_PORT,
+    );
+
+    Ok(ConductorReady { handle, lair_client })
+}
+
+/// PHASE 2 of startup: install the chosen network's DNA and wire the app.
+///
+/// Called from the install_network Tauri command AFTER the user chooses a
+/// network. Installs the proofpoll DNA with the given network_seed +
+/// progenitor_pubkey as modifiers, attaches the app interface, populates
+/// AppState (agent key, app clients, the handle's app_port), and emits Ready.
+///
+/// On failure it does NOT tear down the conductor — it returns the error and
+/// leaves the conductor awaiting a (corrected) network choice for retry.
+pub async fn install_network(
+    app_handle: tauri::AppHandle,
+    resource_dir: PathBuf,
+    network_seed: String,
+    progenitor_pubkey: String,
+    state: std::sync::Arc<crate::commands::AppState>,
+) -> Result<(), String> {
     let _ = app_handle.emit(
         "conductor-status",
         ConductorStatus::Starting {
-            message: "Installing DNA...".into(),
+            message: "Installing network...".into(),
         },
     );
 
-    macro_rules! fail_with_full_cleanup {
-        ($err:expr) => {{
-            let _ = conductor_child.kill();
-            let _ = conductor_child.wait();
-            fail_with_lair_cleanup!($err);
-        }};
-    }
+    let install_result = crate::dna::install_dnas(
+        ADMIN_WS_PORT,
+        &resource_dir,
+        &network_seed,
+        &progenitor_pubkey,
+    )
+    .await
+    .map_err(|e| format!("DNA installation failed: {}", e))?;
 
-    let install_result =
-        match crate::dna::install_dnas(ADMIN_WS_PORT, &resource_dir).await {
-            Ok(r) => r,
-            Err(e) => fail_with_full_cleanup!(format!("DNA installation failed: {}", e)),
-        };
-
-    // 8. Attach app interface.
     let _ = app_handle.emit(
         "conductor-status",
         ConductorStatus::Starting {
@@ -565,22 +612,30 @@ async fn start_holochain_attempt(
         },
     );
     let (app_port, app_client, app_client_v1_2, app_client_v1_1, app_client_v1_0) =
-        match crate::dna::setup_app_interface(
+        crate::dna::setup_app_interface(
             ADMIN_WS_PORT,
             install_result.v1_0_available,
             install_result.v1_1_available,
             install_result.v1_2_available,
         )
         .await
-        {
-            Ok(r) => r,
-            Err(e) => fail_with_full_cleanup!(format!("App interface setup failed: {}", e)),
-        };
+        .map_err(|e| format!("App interface setup failed: {}", e))?;
 
-    // 9. Get the agent key string for the frontend.
     let agent_key_str = install_result.agent_pub_key.to_string();
 
-    // 10. Emit ready.
+    *state.agent_pub_key.lock().unwrap() = Some(agent_key_str.clone());
+    *state.app_client.lock().await = Some(app_client);
+    *state.app_client_v1_2.lock().await = app_client_v1_2;
+    *state.app_client_v1_1.lock().await = app_client_v1_1;
+    *state.app_client_v1_0.lock().await = app_client_v1_0;
+    if let Some(h) = state.conductor_handle.lock().unwrap().as_mut() {
+        h.app_port = Some(app_port);
+    }
+
+    *state.conductor_status.lock().unwrap() = ConductorStatus::Ready {
+        admin_port: ADMIN_WS_PORT,
+        app_port,
+    };
     let _ = app_handle.emit(
         "conductor-status",
         ConductorStatus::Ready {
@@ -589,32 +644,13 @@ async fn start_holochain_attempt(
         },
     );
     log::info!(
-        "Holochain conductor ready (admin: {}, app: {}, agent: {}, migration: {})",
+        "Network installed (admin: {}, app: {}, agent: {})",
         ADMIN_WS_PORT,
         app_port,
         agent_key_str,
-        install_result.needs_migration,
     );
 
-    let conductor_pid = conductor_child.id();
-    let handle = ConductorHandle {
-        lair_child,
-        conductor_child,
-        admin_port: ADMIN_WS_PORT,
-        app_port,
-        conductor_pid,
-    };
-
-    Ok(StartupResult {
-        handle,
-        agent_key: agent_key_str,
-        app_client,
-        app_client_v1_2,
-        app_client_v1_1,
-        app_client_v1_0,
-        lair_client,
-        needs_migration: install_result.needs_migration,
-    })
+    Ok(())
 }
 
 /// Spawn a background task that monitors the conductor process.
