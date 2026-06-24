@@ -1,0 +1,40 @@
+Fieldnotes
+==========
+
+Fieldnotes is a Holochain scenario-testing application by the happenings
+community. It is licensed under the Cryptographic Autonomy License version
+1.0 (CAL-1.0); see LICENSE for the full text.
+
+Authorship and derivation
+--------------------------
+
+Fieldnotes is a fork of ProofPoll (https://github.com/WeAreFlowsta/ProofPoll),
+a verified-polling application created by Flowsta. ProofPoll is the foundation
+on which Fieldnotes is built — the Holochain conductor lifecycle, Flowsta Vault
+identity integration, DNA migration system, and encrypted-data patterns are
+ProofPoll's work, adapted here. We are grateful for it.
+
+ProofPoll is licensed under the MIT License. That original licence is preserved
+verbatim in LICENSE.MIT and continues to apply to the portions of this work
+derived from ProofPoll. The MIT License permits this relicensing, provided the
+original copyright notice and licence text are retained — which they are.
+
+Copyright
+---------
+
+  Portions derived from ProofPoll:
+    Copyright (c) 2026 ProofPoll contributors (MIT — see LICENSE.MIT)
+
+  Portions original to Fieldnotes:
+    Copyright © 2026 happenings community (CAL-1.0 — see LICENSE)
+
+What changed
+------------
+
+Fieldnotes repurposes ProofPoll's polling substrate into a structured
+scenario-testing tool: polls and votes became Items, Responses, and Findings;
+a validate-enforced administrator gate, an archive primitive, a bulk scenario
+importer, and an advisory private-data check were added. The shared Holochain
+and Flowsta foundation, and the principled divergence in how each application
+treats public versus private data, are the subject of a hAppenings community
+article on convergent evolution in the Holochain ecosystem.

@@ -1,8 +1,8 @@
 {
-  "name": "proofpoll",
-  "description": "ProofPoll - Verified polls with Flowsta identity linking",
-  "version": "0.2.1",
-  "license": "MIT",
+  "name": "fieldnotes",
+  "description": "Fieldnotes - Holochain scenario-testing with Flowsta identity linking",
+  "version": "0.1.0",
+  "license": "CAL-1.0",
   "engines": {
     "node": "^18.17.0 || ^20.3.0 || >=21.0.0"
   },
