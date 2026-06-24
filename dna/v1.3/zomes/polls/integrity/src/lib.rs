@@ -91,6 +91,8 @@ pub struct Item {
     /// Ordering within the campaign.
     pub order: u32,
     pub created_at: i64,
+    /// Admin-archived items are hidden from get_all_items and the board.
+    pub is_archived: bool,
 }
 
 /// A tester's verdict on a scenario. One per agent per item: a prior
@@ -159,6 +161,7 @@ pub fn all_items_anchor() -> ExternResult<EntryHash> {
         look_for: String::new(),
         order: 0,
         created_at: 0,
+        is_archived: false,
     })
 }
 

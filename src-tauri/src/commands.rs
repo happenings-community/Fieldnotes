@@ -789,6 +789,62 @@ pub async fn get_all_items(
     Ok(items)
 }
 
+#[tauri::command]
+pub async fn archive_item(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    action_hash: String,
+) -> Result<String, String> {
+    let client = state.app_client.lock().await;
+    let client = client.as_ref().ok_or("Conductor not ready")?;
+
+    let hash = ActionHash::try_from(action_hash).map_err(|e| format!("Invalid action hash: {:?}", e))?;
+    let payload = ExternIO::encode(hash).map_err(|e| e.to_string())?;
+    let result = call_zome(client, POLLS_ZOME, "archive_item", payload).await?;
+
+    let archive_hash: ActionHash = result.decode().map_err(|e| e.to_string())?;
+    Ok(archive_hash.to_string())
+}
+
+#[tauri::command]
+pub async fn get_archived_items(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+) -> Result<Vec<ItemListItem>, String> {
+    let client = state.app_client.lock().await;
+    let client = client.as_ref().ok_or("Conductor not ready")?;
+
+    let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
+    let result = call_zome(client, POLLS_ZOME, "get_archived_items", payload).await?;
+    let records: Vec<Record> = result.decode().map_err(|e| e.to_string())?;
+
+    let mut items = Vec::new();
+    for record in &records {
+        if let Ok(item) = decode_entry::<Item>(record) {
+            items.push(ItemListItem {
+                hash: record.action_address().to_string(),
+                item,
+                author: record.action().author().to_string(),
+            });
+        }
+    }
+    Ok(items)
+}
+
+#[tauri::command]
+pub async fn unarchive_item(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    action_hash: String,
+) -> Result<String, String> {
+    let client = state.app_client.lock().await;
+    let client = client.as_ref().ok_or("Conductor not ready")?;
+
+    let hash = ActionHash::try_from(action_hash).map_err(|e| format!("Invalid action hash: {:?}", e))?;
+    let payload = ExternIO::encode(hash).map_err(|e| e.to_string())?;
+    let result = call_zome(client, POLLS_ZOME, "unarchive_item", payload).await?;
+
+    let unarchive_hash: ActionHash = result.decode().map_err(|e| e.to_string())?;
+    Ok(unarchive_hash.to_string())
+}
+
 #[allow(dead_code)] // dormant: no Item delete in v0.0.1 (unregistered)
 #[tauri::command]
 pub async fn delete_poll(
@@ -1905,7 +1961,7 @@ pub async fn build_canonical_backup(
     // 5. Assemble the canonical payload.
     let mut payload = serde_json::json!({
         "version": 1,
-        "_readme": "Your ProofPoll data, backed up automatically by Flowsta Vault. Encrypted with your device key — only you can read it. Each record below carries a plain-English view of what you authored AND a signed Holochain record for restore. The lair_* fields are the cryptographic keys that let you recover this identity on a fresh install.",
+        "_readme": "Your Fieldnotes data, backed up automatically by Flowsta Vault. Encrypted with your device key — only you can read it. Each record below carries a plain-English view of what you authored AND a signed Holochain record for restore. The lair_* fields are the cryptographic keys that let you recover this identity on a fresh install.",
         "license": "Cryptographic Autonomy License v1.0 (CAL-1.0)",
         "app": {
             "name": "ProofPoll",

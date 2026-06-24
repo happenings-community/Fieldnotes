@@ -90,6 +90,7 @@ fn do_create_item(input: CreateItemInput) -> ExternResult<ActionHash> {
         look_for: input.look_for,
         order: input.order,
         created_at: now,
+        is_archived: false,
     };
 
     let action_hash = create_entry(&EntryZomes::Integrity(EntryTypes::Item(item)))?;
@@ -119,7 +120,44 @@ pub fn import_items(items: Vec<CreateItemInput>) -> ExternResult<u32> {
 
 #[hdk_extern]
 pub fn get_item(action_hash: ActionHash) -> ExternResult<Option<Record>> {
-    get(action_hash, GetOptions::default())
+    // Follow the update chain so the detail screen reflects the latest state.
+    get_latest_record(action_hash)
+}
+
+/// Resolve an action hash to the LATEST record in its update chain.
+///
+/// A plain `get()` returns the record for that specific action — for an
+/// original Create, that means the original entry, ignoring any later
+/// updates. Items can be updated (archive/unarchive flips `is_archived`),
+/// so reads must follow the chain to the newest update. `get_details`
+/// returns the update actions on a record; we walk to the most recent and
+/// return its record, falling back to the original when there are no updates.
+fn get_latest_record(original_hash: ActionHash) -> ExternResult<Option<Record>> {
+    let Some(details) = get_details(original_hash.clone(), GetOptions::default())? else {
+        return Ok(None);
+    };
+
+    let record_details = match details {
+        Details::Record(rd) => rd,
+        _ => return Err(wasm_error!("Expected record details")),
+    };
+
+    // No updates: the original is the latest.
+    if record_details.updates.is_empty() {
+        return Ok(Some(record_details.record));
+    }
+
+    // Pick the update with the newest action timestamp.
+    let mut latest = record_details.updates[0].clone();
+    for upd in record_details.updates.iter() {
+        if upd.action().timestamp() > latest.action().timestamp() {
+            latest = upd.clone();
+        }
+    }
+
+    // The update's SignedActionHashed carries the action hash; fetch its full record.
+    let latest_hash = latest.action_address().clone();
+    get(latest_hash, GetOptions::default())
 }
 
 #[hdk_extern]
@@ -134,12 +172,78 @@ pub fn get_all_items(_: ()) -> ExternResult<Vec<Record>> {
     for link in links {
         let hash = ActionHash::try_from(link.target)
             .map_err(|_| wasm_error!("Invalid item link target"))?;
-        if let Some(record) = get(hash, GetOptions::default())? {
-            records.push(record);
+        // Follow the update chain so archive/unarchive is reflected.
+        if let Some(record) = get_latest_record(hash)? {
+            if let Ok(item) = Item::try_from(record.clone()) {
+                if !item.is_archived {
+                    records.push(record);
+                }
+            }
         }
     }
 
     Ok(records)
+}
+
+/// The inverse of get_all_items: the archived ones. Admin-facing, for the
+/// control room's "Archived scenarios" section. Same chain-following read,
+/// opposite filter.
+#[hdk_extern]
+pub fn get_archived_items(_: ()) -> ExternResult<Vec<Record>> {
+    let anchor = all_items_anchor()?;
+    let links = get_links(
+        LinkQuery::try_new(anchor, LinkTypes::AllItems)?,
+        GetStrategy::default(),
+    )?;
+
+    let mut records = Vec::new();
+    for link in links {
+        let hash = ActionHash::try_from(link.target)
+            .map_err(|_| wasm_error!("Invalid item link target"))?;
+        if let Some(record) = get_latest_record(hash)? {
+            if let Ok(item) = Item::try_from(record.clone()) {
+                if item.is_archived {
+                    records.push(record);
+                }
+            }
+        }
+    }
+
+    Ok(records)
+}
+
+/// Flip an item's archived flag (admin-only). Shared by archive/unarchive.
+///
+/// Crucially, the update chains off the LATEST action in the item's chain,
+/// not the original — otherwise archive → unarchive → archive would branch
+/// the chain into siblings off the original. Resolving to the latest first
+/// keeps it linear: original → archived → unarchived → archived.
+fn set_item_archived(original_hash: ActionHash, archived: bool) -> ExternResult<ActionHash> {
+    let my_pubkey = agent_info()?.agent_initial_pubkey;
+    if !is_administrator(my_pubkey.clone())? {
+        return Err(wasm_error!("Only administrators can archive items"));
+    }
+
+    // Resolve to the latest record so we update the head of the chain.
+    let Some(latest) = get_latest_record(original_hash)? else {
+        return Err(wasm_error!("Item not found"));
+    };
+    let latest_hash = latest.action_address().clone();
+
+    let mut item = Item::try_from(latest)?;
+    item.is_archived = archived;
+
+    update_entry(latest_hash, item)
+}
+
+#[hdk_extern]
+pub fn archive_item(action_hash: ActionHash) -> ExternResult<ActionHash> {
+    set_item_archived(action_hash, true)
+}
+
+#[hdk_extern]
+pub fn unarchive_item(action_hash: ActionHash) -> ExternResult<ActionHash> {
+    set_item_archived(action_hash, false)
 }
 
 // ── Response functions ──────────────────────────────────────────────────
