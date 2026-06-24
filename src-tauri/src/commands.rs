@@ -2501,6 +2501,7 @@ pub async fn install_network(
     network_seed: String,
     progenitor_pubkey: String,
 ) -> Result<(), String> {
+    #[cfg(not(debug_assertions))]
     use tauri::Manager;
 
     #[cfg(debug_assertions)]

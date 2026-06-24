@@ -30,10 +30,12 @@ It was built for a real job: testing the [Requests & Offers](https://github.com/
 The first invited-tester release.
 
 - Scenario testing on a Holochain DHT: shared boards, per-tester verdicts, append-only findings, cross-machine corroboration, and emergent-issue reports with live duplicate detection.
-- A validation-enforced administrator gate (scenario creation is restricted to administrators in the integrity layer, not just the UI). Runs in a permissive mode in this alpha — see [Running your own network](#running-your-own-network).
+- A validation-enforced administrator gate: scenario creation is restricted to administrators in the integrity layer, not just the UI. Administrator authority is held by the network's progenitor — set when you create the network from your Flowsta identity — and verified cryptographically, so a grant cannot be forged.
 - Encrypted attachments scoped to the administrator cohort: a tester attaches an image to a finding, readable only by administrators. Adding an administrator later grants access without re-encrypting the image.
 - Archive (not delete) for scenarios — hiding a scenario preserves every verdict and finding attached to it.
 - A one-click, portable CAL-compliant export of everything you've authored.
+
+> **Verified across agents.** The progenitor enforcement and peer-to-peer sync are covered by an automated multi-agent test: two separate agents on one network, where the progenitor can administer, a second agent's attempt to self-grant is rejected, and a scenario created by one syncs to the other.
 
 > **Honest note on the encryption.** The encrypted-attachment crypto is new in this release. It has unit tests covering round-trip correctness, tamper detection, and wrong-key rejection, and it has been verified end-to-end in the running app — but it has **not** been through an external security review or audit. Treat it as defence-in-depth for an alpha on test data, not as a guarantee for genuinely sensitive material. If something must never be exposed, don't put it in this alpha.
 
@@ -97,7 +99,9 @@ The deeper infrastructure (conductor lifecycle, Flowsta integration, DNA migrati
 
 Fieldnotes is a fork of **[ProofPoll](https://github.com/WeAreFlowsta/ProofPoll)** by Flowsta — a verified-polling Holochain app, explicitly built to be forked. ProofPoll solved the genuinely hard parts of a desktop Holochain app (conductor lifecycle, Flowsta identity linking, DNA migration, encrypted private data on a public DHT) so that the next person doesn't have to. Fieldnotes is that fork: the polling substrate became a scenario-testing substrate.
 
-Flowsta's claim for ProofPoll is that you can build a real, useful Holochain application on top of it **without being a developer**. Fieldnotes is the evidence. It was built by a product owner who does not know any programming language — "usefully ignorant," comfortable at a terminal but not a coder — working with an AI assistant. From forking ProofPoll to shipping this working alpha took **just over 24 hours of elapsed time**, across a couple of sittings (the git history bears this out).
+Flowsta's claim for ProofPoll is that you can build a real, useful Holochain application on top of it **without being a developer**. Fieldnotes is the evidence. It was built by a product owner who does not know any programming language — "usefully ignorant," comfortable at a terminal but not a coder — working with an AI assistant, across a couple of focused sittings (the git history bears this out).
+
+The stronger evidence is what happened when it broke. An early build shipped with the administrator gate inert — built, but not actually enforcing. Rather than paper over it, the same non-developer-plus-AI pairing traced the fault down through five layers to its root cause (a raw-versus-serialized signature mismatch in the integrity zome), fixed it, and went further — rebuilding the app around self-sovereign network creation and proving the enforcement holds across separate agents with an automated test. Finding, fixing, and hardening a real cryptographic bug is a higher bar than getting lucky on the first try — and it was cleared without writing the code by hand.
 
 The headline is not *who* built it. It is *who can*. If someone who can't write code can produce a usable peer-to-peer application on this foundation, the barrier everyone assumed stood between an idea and a shipped hApp is lower than it looks. A companion guide — *building on ProofPoll as a non-developer* — is planned to turn this proof into a path others can follow.
 
@@ -105,12 +109,12 @@ The headline is not *who* built it. It is *who can*. If someone who can't write 
 
 ## Running your own network
 
-Fieldnotes inherits ProofPoll's fork-friendliness. To run it for your own testing on a separate network where you are the administrator, build from source and change two things in `dna/v1.3/workdir/dna.yaml` first:
+Fieldnotes is self-sovereign: there is no central network, and no key baked into the build. The first time you run it, you choose your network.
 
-1. **The network seed** (`network_seed`) determines *which network you join* — everyone who builds with the same seed shares a DHT. Change it to a unique value for an independent network.
-2. **The progenitor key** (`progenitor_pubkey`) determines *who can administer that network*. Set it to your own stable Flowsta Vault key (shown on the Identity screen) and only you can issue valid administrator grants. Leaving it null runs the gate in permissive mode (fine for a trusted alpha, not for an open network).
+- **Create your own.** Pick "Create my network" and your Flowsta Vault identity becomes that network's *progenitor* — its sole administrator. A fresh, isolated network is generated for you. Only you can issue valid administrator grants on it; this is enforced cryptographically at validation time, not just in the UI.
+- **Join one you've been invited to.** A network's administrator can generate an invite string (`fieldnotes://join?...`) from their Admin screen and share it. Paste it into "Join a network" on first run, and you join *their* network as a member. Members cannot grant themselves administrator — the network's progenitor is fixed at creation.
 
-Both values are baked into the build, so a distributed binary is the boundary: people you give it to join *your* network as members and cannot become administrators. The build toolchain (Rust, the Holochain/lair binaries, the `hc` CLI, Node) and the `build-all.sh` / `cargo tauri build` flow are inherited from ProofPoll — see its README.
+Because the network seed and progenitor are part of the network's identity, every created network is cryptographically distinct: different networks cannot see each other's data, and a member of one cannot administer another. Building from source is only needed to modify Fieldnotes itself — running your own network needs nothing but the app.
 
 ---
 
@@ -118,8 +122,8 @@ Both values are baked into the build, so a distributed binary is the boundary: p
 
 Fieldnotes is honest about what it does and doesn't enforce yet:
 
-- **Membership** is not cryptographically gated in this alpha. Anyone with the binary can join the network; access is limited by *distribution* (the binary goes to invited testers), not by a join membrane. A Flowsta-keyed membrane is future work.
-- **Administration** runs in permissive mode in the shipped alpha (proven in development, not enforced by a burned-in progenitor key). Vault-keyed enforcement is the headline hardening for the next release.
+- **Membership** is not cryptographically gated in this alpha. Joining a network requires its invite string (seed + progenitor), which you share only with the people you want as members — so access is limited by *who you give the invite to*, not by a cryptographic join membrane. Anyone who obtains an invite can use it; a Flowsta-keyed membrane that gates membership at the network boundary is future work.
+- **Administration** is cryptographically enforced. When you create a network, your Flowsta progenitor key is burned into that network's identity; only the progenitor can issue valid administrator grants, verified at validation time. This is proven across separate agents by an automated test — a non-progenitor's self-grant is rejected.
 - **Attachment encryption** protects attached images from non-administrators, but its crypto is new and unaudited (see [What's New](#whats-new)). Treat it as alpha-grade defence-in-depth, not a guarantee. Finding *text* is public by design and only advisory-checked for accidental private data.
 
 These are deliberate choices for an early alpha on public test data, not oversights — and they map the hardening path toward R&O's heavier model.

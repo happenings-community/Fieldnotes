@@ -437,7 +437,10 @@ pub async fn start_holochain(
 async fn start_holochain_attempt(
     app_handle: tauri::AppHandle,
     data_dir: PathBuf,
-    resource_dir: PathBuf,
+    // Phase 1 no longer installs the DNA (that moved to install_network /
+    // phase 2), so the resource dir is unused here but kept in the signature
+    // since the startup flow threads it through.
+    _resource_dir: PathBuf,
     passphrase: String,
 ) -> Result<ConductorReady, String> {
     let _ = app_handle.emit(
