@@ -51,6 +51,14 @@ rmp-serde = "1"
 # Base64 for signature decoding
 base64 = "0.22"
 
+# Direct handle on the `ring` crate (already in the dependency tree
+# transitively via lair/holochain; pinned to the exact version Cargo.lock
+# already resolves, so this changes no downloads and disturbs no hashes).
+# Used for host-side AEAD bulk encryption of attachment images: the ring
+# cipher does not route through lair IPC, so it avoids the 8 KB FrameOverflow
+# that caps every lair crypto call.
+ring = "=0.17.14"
+
 # Hex encoding for the unknown-entry-type fallback in decode_record_for_export,
 # so the user still sees *something* in their Vault export per CAL §4.2.1.
 hex = "0.4"
