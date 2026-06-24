@@ -10,6 +10,7 @@ import { useNavigate, Link } from "@builder.io/qwik-city";
 import { linkedContext } from "~/lib/context";
 import { setSignInIntent } from "~/lib/signin";
 import { formatInvokeError } from "~/lib/errors";
+import { scanForPrivateData } from "~/lib/private-data";
 import {
   createItem,
   getAllItems,
@@ -110,6 +111,10 @@ export default component$(() => {
   // body lives in exactly one place (the findings thread), never split between
   // `instructions` and a finding depending on which screen it was typed on.
   const summary = useSignal("");
+  // Advisory live scan for private data in the issue summary. Does not block.
+  const summaryPrivacyHits = useComputed$(() =>
+    scanForPrivateData(summary.value),
+  );
   // Debounced mirror of `summary` — ranking keys off this so the list settles
   // a beat after the reporter stops typing rather than reshuffling per keystroke.
   const rankQuery = useSignal("");
@@ -278,6 +283,16 @@ export default component$(() => {
             placeholder="One line: what's broken or surprising"
           />
         </div>
+
+        {summaryPrivacyHits.value.length > 0 && (
+          <div class="bg-amber-950/40 border border-amber-800/60 rounded-lg p-3 -mt-2">
+            <p class="text-xs text-amber-300">
+              This may contain private data (
+              {summaryPrivacyHits.value.map((h) => h.hint).join(", ")}). Reports
+              are public &mdash; please review before submitting.
+            </p>
+          </div>
+        )}
 
         {/* Search status: makes the dedup search visible, so a clean
             result reads as "we checked" rather than silence. */}

@@ -3,6 +3,7 @@ import {
   useContext,
   useSignal,
   useVisibleTask$,
+  useComputed$,
   $,
 } from "@builder.io/qwik";
 import { Link, useNavigate } from "@builder.io/qwik-city";
@@ -17,6 +18,7 @@ import { Link, useNavigate } from "@builder.io/qwik-city";
 // switching scenarios is just a hash change.
 import { linkedContext } from "~/lib/context";
 import { formatInvokeError } from "~/lib/errors";
+import { scanForPrivateData } from "~/lib/private-data";
 import { invoke } from "@tauri-apps/api/core";
 import {
   getItem,
@@ -129,6 +131,11 @@ export default component$(() => {
   // tool is usable; this phase is plaintext only.
   const findings = useSignal<FindingData[]>([]);
   const findingInput = useSignal("");
+  // Advisory live scan: flags likely private data as the tester types, so
+  // they can review before submitting. Does not block submission.
+  const findingPrivacyHits = useComputed$(() =>
+    scanForPrivateData(findingInput.value),
+  );
   const findingSubmitting = useSignal(false);
   const findingError = useSignal<string | null>(null);
 
@@ -526,6 +533,15 @@ export default component$(() => {
                 placeholder="What did you notice? Steps, unexpected behaviour, anything worth recording…"
                 class="w-full bg-gray-950 border border-gray-800 rounded-lg p-3 text-sm text-gray-200 placeholder-gray-600 focus:outline-none focus:border-gray-600 resize-y disabled:opacity-50"
               />
+              {findingPrivacyHits.value.length > 0 && (
+                <div class="mt-2 bg-amber-950/40 border border-amber-800/60 rounded-lg p-3">
+                  <p class="text-xs text-amber-300">
+                    This finding may contain private data (
+                    {findingPrivacyHits.value.map((h) => h.hint).join(", ")}).
+                    Findings are public &mdash; please review before submitting.
+                  </p>
+                </div>
+              )}
               <div class="flex items-center justify-between mt-2">
                 {findingError.value ? (
                   <p class="text-xs text-red-400">{findingError.value}</p>
