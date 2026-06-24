@@ -11,3 +11,4 @@ name = "polls_integrity"
 hdi = { workspace = true }
 serde = { workspace = true }
 holochain_serialized_bytes = { workspace = true }
+base64 = { workspace = true }

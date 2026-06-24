@@ -498,11 +498,62 @@ export async function deleteDraft(draftActionHash: string): Promise<string> {
   return invoke<string>("delete_draft", { draftActionHash });
 }
 
+/**
+ * Ask the user's Flowsta Vault to sign raw bytes with their DURABLE device
+ * identity key (NOT the volatile cell agent). Used to produce a progenitor
+ * signature over an admin pubkey, which validate_admin_grant verifies against
+ * the progenitor key burned into the DNA.
+ *
+ * Vault gates /sign to linked apps (we link via linkFlowstaIdentity), and
+ * prompts the user to approve each request. Returns the base64 signature and
+ * the signer's agent pubkey (the durable device key = the progenitor key).
+ */
+export async function signViaVault(
+  bytesB64: string,
+  reason: string,
+): Promise<{ signature: number[]; agentPubKey: string }> {
+  const resp = await fetch("http://127.0.0.1:27777/sign", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ type: "bytes", bytes: bytesB64, reason }),
+    signal: AbortSignal.timeout(60000), // user must approve in Vault
+  });
+  if (!resp.ok) {
+    let detail = "";
+    try {
+      const e = await resp.json();
+      detail = e.description || e.error || "";
+    } catch {
+      // non-JSON error body
+    }
+    throw new Error(`Vault /sign failed (${resp.status}): ${detail}`);
+  }
+  const out = await resp.json();
+  if (!out.success || !out.signature) {
+    throw new Error("Vault /sign returned no signature");
+  }
+  // Vault returns the signature base64-encoded; decode to a byte array so it
+  // can be passed straight to add_administrator (Rust Vec<u8>).
+  const sigBytes = Array.from(atob(out.signature), (c) => c.charCodeAt(0));
+  return { signature: sigBytes, agentPubKey: out.agent_pub_key };
+}
+
+/**
+ * Get the 39 raw bytes of an agent pubkey string, base64-encoded, computed in
+ * Rust (the frontend keeps no @holochain/client). These are the exact bytes
+ * signed for an AdminGrant and verified by the integrity zome.
+ */
+export async function pubkeyRawB64(pubkeyStr: string): Promise<string> {
+  return invoke<string>("pubkey_raw_b64", { pubkeyStr });
+}
+
 export async function addAdministrator(
-  adminPubkeyStr?: string
+  adminPubkeyStr: string,
+  progenitorSignature: number[]
 ): Promise<string> {
   const result = await invoke("add_administrator", {
-    adminPubkeyStr: adminPubkeyStr ?? null,
+    adminPubkeyStr,
+    progenitorSignature,
   });
   return result as string;
 }

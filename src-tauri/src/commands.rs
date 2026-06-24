@@ -20,7 +20,7 @@
 use crate::conductor::{ConductorHandle, ConductorStatus};
 use holochain_client::AppWebsocket;
 use holochain_types::prelude::{
-    ActionHash, AgentPubKey, ExternIO, FunctionName, Record, ZomeName,
+    ActionHash, AgentPubKey, ExternIO, FunctionName, Record, Signature, ZomeName,
 };
 use lair_keystore_api::prelude::LairClient;
 use std::path::{Path, PathBuf};
@@ -2104,63 +2104,72 @@ fn action_variant_label(action: &holochain_integrity_types::Action) -> String {
 /// include all three or none.
 // ── Administrator functions ────────────────────────────────────────
 
-/// Add an administrator by creating an AdminGrant entry.
-/// Signs the admin pubkey with the LOCAL agent's private key (the progenitor,
-/// stored in lair). This creates a validate-proof grant that lets the admin
-/// create Scenarios. Only meaningful when called by the progenitor.
+/// Commit an AdminGrant entry. The progenitor signature is produced by the
+/// FRONTEND via Flowsta Vault's /sign endpoint (signed with the user's durable
+/// device identity key — the progenitor), then passed down here. This host
+/// command no longer signs anything itself; it only commits the grant. The
+/// signature is verified in the integrity zome (validate_admin_grant) against
+/// the progenitor pubkey burned into the DNA properties.
 #[tauri::command]
 pub async fn add_administrator(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
-    admin_pubkey_str: Option<String>,
+    admin_pubkey_str: String,
+    progenitor_signature: Vec<u8>,
 ) -> Result<String, String> {
-    // Get the progenitor's (local agent's) key bytes for signing
-    let progenitor_agent_key_bytes = get_agent_ed25519_bytes(&state)?;
+    if admin_pubkey_str.trim().is_empty() {
+        return Err("admin_pubkey_str must not be empty".to_string());
+    }
 
-    // Resolve the grantee: if no pubkey given, self-grant to the local agent.
-    // This is the bootstrap path — the progenitor grants themselves.
-    let admin_pubkey_str = match admin_pubkey_str {
-        Some(s) if !s.trim().is_empty() => s,
-        _ => state
-            .agent_pub_key
-            .lock()
-            .unwrap()
-            .clone()
-            .ok_or("Local agent key not available")?,
-    };
+    // Validate the pubkey parses (defensive; the zome re-checks).
+    parse_agent_pub_key_string(&admin_pubkey_str)
+        .map_err(|_| "Invalid admin pubkey format".to_string())?;
 
     let client = state.app_client.lock().await;
     let client = client.as_ref().ok_or("Conductor not ready")?;
 
-    let lair = state.lair_client.lock().await;
-    let lair = lair.as_ref().ok_or("Lair not ready")?;
-
-    // Parse the admin pubkey from string
+    // Parse the admin pubkey into the typed AgentPubKey the zome expects.
     let admin_pubkey = parse_agent_pub_key_string(&admin_pubkey_str)
         .map_err(|_| "Invalid admin pubkey format".to_string())?;
 
-    // Sign the admin pubkey bytes with the progenitor's key
-    let admin_pubkey_raw = admin_pubkey.get_raw_39().to_vec();
-    let signature_bytes = crate::crypto::sign_raw(lair, progenitor_agent_key_bytes, &admin_pubkey_raw)
-        .await?;
+    // Convert the 64-byte signature into a Signature. Encoding a TYPED struct
+    // (not a serde_json::json! blob) is essential: AgentPubKey and Signature
+    // must serialize in their native msgpack forms, or the zome's deserialize
+    // produces a malformed Signature and verify_signature fails.
+    let sig_array: [u8; 64] = progenitor_signature
+        .as_slice()
+        .try_into()
+        .map_err(|_| format!("signature must be 64 bytes, got {}", progenitor_signature.len()))?;
 
-    // Get the timestamp
-    let now = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| format!("Time error: {}", e))?
-        .as_secs() as i64;
+    #[derive(serde::Serialize, Debug)]
+    struct AddAdministratorInput {
+        admin_pubkey: AgentPubKey,
+        progenitor_signature: Signature,
+    }
 
-    // Manually encode: { admin_pubkey, progenitor_signature, created_at }
-    let input = serde_json::json!({
-        "admin_pubkey": admin_pubkey_str,
-        "progenitor_signature": signature_bytes.clone(),
-        "created_at": now,
-    });
+    let input = AddAdministratorInput {
+        admin_pubkey,
+        progenitor_signature: Signature(sig_array),
+    };
 
     let payload = ExternIO::encode(input).map_err(|e| e.to_string())?;
     let result = call_zome(client, POLLS_ZOME, "add_administrator", payload).await?;
 
     let action_hash: ActionHash = result.decode().map_err(|e| e.to_string())?;
     Ok(action_hash.to_string())
+}
+
+/// Return the 39 raw bytes of an AgentPubKey string, base64-encoded.
+/// Used by the frontend to obtain the exact bytes that must be signed by
+/// Flowsta Vault for an AdminGrant — the frontend keeps no @holochain/client,
+/// so this byte-shaping stays in Rust. The integrity zome verifies the
+/// progenitor signature over these same 39 bytes (admin_pubkey.get_raw_39()).
+#[tauri::command]
+pub fn pubkey_raw_b64(pubkey_str: String) -> Result<String, String> {
+    use base64::Engine;
+    let pubkey = parse_agent_pub_key_string(&pubkey_str)
+        .map_err(|_| "Invalid pubkey format".to_string())?;
+    let raw39 = pubkey.get_raw_39();
+    Ok(base64::engine::general_purpose::STANDARD.encode(raw39))
 }
 
 /// Check if the current agent is an administrator.

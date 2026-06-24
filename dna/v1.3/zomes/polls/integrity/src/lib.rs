@@ -15,6 +15,26 @@
 
 use hdi::prelude::*;
 
+/// Parse an AgentPubKey from its `uhCAk...` multibase string.
+///
+/// hdi's bare `AgentPubKey::try_from(String)` does NOT decode the holo-hash
+/// base64 form (it failed at runtime with "Could not parse progenitor pubkey").
+/// This mirrors the host's parse_agent_pub_key_string: strip the 'u' multibase
+/// prefix, base64url-decode (no padding), expect 39 bytes (3 prefix + 32 key +
+/// 4 DHT location), then from_raw_39. Used to read progenitor_pubkey from the
+/// DNA properties during AdminGrant validation.
+fn parse_progenitor_pubkey(s: &str) -> Result<AgentPubKey, String> {
+    use base64::Engine;
+    let b64 = s.strip_prefix('u').ok_or("progenitor pubkey must start with 'u'")?;
+    let raw = base64::engine::general_purpose::URL_SAFE_NO_PAD
+        .decode(b64)
+        .map_err(|e| format!("invalid base64 in progenitor pubkey: {}", e))?;
+    if raw.len() != 39 {
+        return Err(format!("progenitor pubkey wrong length: {} (expected 39)", raw.len()));
+    }
+    Ok(AgentPubKey::from_raw_39(raw))
+}
+
 // ── DNA Properties ─────────────────────────────────────────────────────
 
 /// DNA-level configuration, burned in at hApp bundle time.
@@ -309,13 +329,16 @@ fn validate_admin_grant(grant: &AdminGrant) -> ExternResult<ValidateCallbackResu
     
     // If progenitor is set, verify the signature
     if let Some(progenitor_pubkey_str) = properties.progenitor_pubkey {
-        match AgentPubKey::try_from(progenitor_pubkey_str.clone()) {
+        match parse_progenitor_pubkey(&progenitor_pubkey_str) {
             Ok(progenitor_pubkey) => {
                 // Create the payload to verify: the admin pubkey's raw bytes
                 let payload = grant.admin_pubkey.get_raw_39().to_vec();
-                
-                // Verify the signature
-                if !verify_signature(
+
+                // Verify the signature over the LITERAL bytes. Vault's /sign
+                // signs the raw bytes as-is, so we must use verify_signature_raw
+                // (NOT verify_signature, which serializes the data first — that
+                // mismatch is exactly why grants failed to verify).
+                if !verify_signature_raw(
                     progenitor_pubkey,
                     grant.progenitor_signature.clone(),
                     payload,

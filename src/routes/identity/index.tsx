@@ -11,6 +11,8 @@ import {
   revokeIdentityLink,
   saveProfileCache,
   addAdministrator,
+  signViaVault,
+  pubkeyRawB64,
   isAdministrator,
 } from "~/lib/holochain";
 
@@ -303,7 +305,19 @@ export default component$(() => {
     adminGrantMsg.value = null;
     becomingAdmin.value = true;
     try {
-      await addAdministrator();
+      if (!agentKey.value) {
+        adminGrantError.value = "Agent key not available yet.";
+        becomingAdmin.value = false;
+        return;
+      }
+      // Self-grant: sign THIS agent's own 39-byte pubkey with the durable
+      // Flowsta key via Vault (user approves in Vault), then commit the grant.
+      const pkRawB64 = await pubkeyRawB64(agentKey.value);
+      const { signature } = await signViaVault(
+        pkRawB64,
+        "Grant yourself administrator (bootstrap)",
+      );
+      await addAdministrator(agentKey.value, signature);
       isAdmin.value = await isAdministrator();
       adminGrantMsg.value = isAdmin.value
         ? "You're now an administrator."

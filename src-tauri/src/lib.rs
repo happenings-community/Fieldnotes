@@ -239,6 +239,7 @@ pub fn run() {
             // in commands.rs but intentionally not registered here.
             // ── Administrator functions (new) ─────────────────────
             commands::add_administrator,
+            commands::pubkey_raw_b64,
             commands::is_administrator,
             commands::get_administrators,
             commands::get_admin_grant_hash,

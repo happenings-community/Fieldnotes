@@ -33,6 +33,45 @@ echo "Copying polls WASM (reusing the committed agent_linking WASM)..."
 cp target/wasm32-unknown-unknown/release/polls_integrity.wasm workdir/
 cp target/wasm32-unknown-unknown/release/polls_coordinator.wasm workdir/
 
+# DNA modifier injection (progenitor key + network seed).
+#
+# Committed dna.yaml ships SAFE DEFAULTS: progenitor_pubkey null (bootstrap
+# mode) and network_seed "fieldnotes-network-v1". Forkers override either or
+# both via env vars to stand up their OWN isolated network with their OWN admin:
+#
+#   FIELDNOTES_PROGENITOR_PUBKEY  durable Flowsta agent key (uhCAk..., from
+#                                 Vault /status) -- enables admin enforcement
+#   FIELDNOTES_NETWORK_SEED       a unique string -- isolates this network from
+#                                 every other Fieldnotes deployment
+#
+# Both values are DNA modifiers, so changing either yields a different DNA
+# hash = a separate DHT. We substitute just for the pack, then a trap restores
+# dna.yaml on ANY exit, so no per-deployer value is ever committed or left in
+# the working tree.
+if [ -n "$FIELDNOTES_PROGENITOR_PUBKEY" ] || [ -n "$FIELDNOTES_NETWORK_SEED" ]; then
+    cp workdir/dna.yaml workdir/dna.yaml.bak
+    trap 'mv -f workdir/dna.yaml.bak workdir/dna.yaml 2>/dev/null || true' EXIT
+
+    if [ -n "$FIELDNOTES_PROGENITOR_PUBKEY" ]; then
+        echo "Injecting progenitor pubkey from FIELDNOTES_PROGENITOR_PUBKEY..."
+        if ! grep -q "progenitor_pubkey: null" workdir/dna.yaml; then
+            echo "ERROR: expected progenitor_pubkey: null in dna.yaml" >&2; exit 1
+        fi
+        sed -i.sedbak "s|progenitor_pubkey: null|progenitor_pubkey: \"$FIELDNOTES_PROGENITOR_PUBKEY\"|" workdir/dna.yaml
+        rm -f workdir/dna.yaml.sedbak
+        echo "  progenitor_pubkey set for this build"
+    fi
+
+    if [ -n "$FIELDNOTES_NETWORK_SEED" ]; then
+        echo "Injecting network seed from FIELDNOTES_NETWORK_SEED..."
+        sed -i.sedbak "s|network_seed: \".*\"|network_seed: \"$FIELDNOTES_NETWORK_SEED\"|" workdir/dna.yaml
+        rm -f workdir/dna.yaml.sedbak
+        echo "  network_seed set for this build"
+    fi
+else
+    echo "No FIELDNOTES_PROGENITOR_PUBKEY or FIELDNOTES_NETWORK_SEED set -- using committed defaults (progenitor_pubkey: null, network_seed: fieldnotes-network-v1)."
+fi
+
 echo "Packing DNA..."
 hc dna pack workdir
 

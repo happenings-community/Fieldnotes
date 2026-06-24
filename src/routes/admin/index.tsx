@@ -7,6 +7,8 @@ import {
 import { Link } from "@builder.io/qwik-city";
 import {
   addAdministrator,
+  signViaVault,
+  pubkeyRawB64,
   getAdministrators,
   isAdministrator,
   getArchivedItems,
@@ -56,7 +58,16 @@ export default component$(() => {
         submitting.value = false;
         return;
       }
-      const grantHash = await addAdministrator(pk);
+      // The 39-byte raw pubkey is computed in Rust (the frontend keeps no
+      // @holochain/client). Sign those bytes with the durable Flowsta key via
+      // Vault (user approves in Vault); the integrity zome verifies the
+      // signature against the progenitor pubkey burned into the DNA.
+      const pkRawB64 = await pubkeyRawB64(pk);
+      const { signature } = await signViaVault(
+        pkRawB64,
+        `Grant admin to ${pk.slice(0, 12)}…`,
+      );
+      const grantHash = await addAdministrator(pk, signature);
       message.value = `Administrator added. Grant: ${grantHash.slice(0, 16)}…`;
       adminPubkey.value = "";
       admins.value = await getAdministrators();

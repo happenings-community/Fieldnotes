@@ -697,6 +697,7 @@ dependencies = [
 name = "polls_integrity_v1_3"
 version = "0.3.0"
 dependencies = [
+ "base64",
  "hdi",
  "holochain_serialized_bytes",
  "serde",

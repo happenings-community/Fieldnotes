@@ -2,7 +2,7 @@
 manifest_version: "0"
 name: proofpoll_v1_3
 integrity:
-  network_seed: "proofpoll-network-v1.3"
+  network_seed: "fieldnotes-network-v1"
   properties:
     progenitor_pubkey: null
   zomes:
