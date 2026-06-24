@@ -13,6 +13,7 @@ import {
   getMigrationStatus,
   getCachedProfile,
   saveProfileCache,
+  isAdministrator,
   type MigrationState,
 } from "~/lib/holochain";
 import { getFlowstaLinkStatus } from "@flowsta/holochain";
@@ -33,6 +34,7 @@ export default component$(() => {
   const displayName = useSignal<string | null>(null);
   const profilePicture = useSignal<string | null>(null);
   const linked = useSignal(false);
+  const isAdmin = useSignal(false);
   // Rich link state: 'linked' / 'offline' / 'mismatch' / 'unlinked'.
   // `linked.value` is permissive (linked || offline); the layout's banner
   // (further down) keys off `linkState.value === 'mismatch'` so individual
@@ -104,6 +106,12 @@ export default component$(() => {
           const s = await invoke<AppStatus>("get_app_status");
           status.value = s;
           if (s.ready) {
+            // Admin status drives the gated Admin nav link. Best-effort.
+            try {
+              isAdmin.value = await isAdministrator();
+            } catch {
+              isAdmin.value = false;
+            }
             // Compute the rich link state in one pass — see context.ts for
             // why we don't just use a boolean.
             //
@@ -363,8 +371,9 @@ export default component$(() => {
     <div class="min-h-screen flex flex-col">
       <header class="bg-gray-900 border-b border-gray-800 px-6 py-3 flex items-center justify-between">
         <div class="flex items-center gap-6">
-          <Link href="/" class="text-xl font-bold text-white hover:text-indigo-400">
-            ProofPoll
+          <Link href="/" class="text-xl font-bold text-white hover:text-indigo-400 flex items-center gap-2">
+            <span aria-hidden="true">📓</span>
+            Fieldnotes
           </Link>
           {status.value?.ready && (
             <nav class="flex gap-4">
@@ -372,24 +381,8 @@ export default component$(() => {
                 href="/"
                 class={`text-sm ${isActive("/") ? "text-indigo-400 font-medium" : "text-gray-400 hover:text-gray-200"}`}
               >
-                Polls
+                Scenarios
               </Link>
-              {linked.value ? (
-                <Link
-                  href="/create/"
-                  class={`text-sm ${isActive("/create/") ? "text-indigo-400 font-medium" : "text-gray-400 hover:text-gray-200"}`}
-                >
-                  Create
-                </Link>
-              ) : (
-                <button
-                  type="button"
-                  onClick$={() => (showSignIn.value = true)}
-                  class={`text-sm ${isActive("/create/") ? "text-indigo-400 font-medium" : "text-gray-400 hover:text-gray-200"}`}
-                >
-                  Create
-                </button>
-              )}
               {linked.value ? (
                 <Link
                   href="/report/"
@@ -406,15 +399,7 @@ export default component$(() => {
                   Report
                 </button>
               )}
-              {linked.value && (
-                <Link
-                  href="/drafts/"
-                  class={`text-sm ${isActive("/drafts/") ? "text-indigo-400 font-medium" : "text-gray-400 hover:text-gray-200"}`}
-                >
-                  Drafts
-                </Link>
-              )}
-              {linked.value && (
+              {isAdmin.value && (
                 <Link
                   href="/admin/"
                   class={`text-sm ${isActive("/admin/") ? "text-indigo-400 font-medium" : "text-gray-400 hover:text-gray-200"}`}
@@ -527,7 +512,7 @@ export default component$(() => {
                   >
                     Close App
                   </button>
-                  <p class="text-gray-600 text-xs mt-2">Reopen ProofPoll after closing to reconnect.</p>
+                  <p class="text-gray-600 text-xs mt-2">Reopen Fieldnotes after closing to reconnect.</p>
                 </div>
               </>
             ) : (
@@ -591,7 +576,7 @@ export default component$(() => {
                       Your Flowsta account has changed
                     </p>
                     <p class="mt-1 text-xs text-amber-300/90">
-                      ProofPoll was connected to a Flowsta account that no
+                      Fieldnotes was connected to a Flowsta account that no
                       longer matches the one in your Vault. Existing polls
                       and votes are still yours, but you'll need to
                       reconnect to create or vote on new ones.

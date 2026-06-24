@@ -178,8 +178,20 @@ export async function getAllItems(): Promise<ItemListItem[]> {
   return invoke<ItemListItem[]>("get_all_items");
 }
 
+export async function getArchivedItems(): Promise<ItemListItem[]> {
+  return invoke<ItemListItem[]>("get_archived_items");
+}
+
 export async function getItem(actionHash: string): Promise<ItemDetail | null> {
   return invoke<ItemDetail | null>("get_item", { actionHash });
+}
+
+export async function archiveItem(actionHash: string): Promise<string> {
+  return invoke<string>("archive_item", { actionHash });
+}
+
+export async function unarchiveItem(actionHash: string): Promise<string> {
+  return invoke<string>("unarchive_item", { actionHash });
 }
 
 export async function createItem(input: CreateItemInput): Promise<string> {

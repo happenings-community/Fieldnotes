@@ -5,7 +5,7 @@ import {
   useVisibleTask$,
   $,
 } from "@builder.io/qwik";
-import { Link } from "@builder.io/qwik-city";
+import { Link, useNavigate } from "@builder.io/qwik-city";
 
 // Why hash-based instead of /poll/[id]/?
 // The Qwik static adapter only pre-renders routes whose param values are
@@ -26,6 +26,8 @@ import {
   createFinding,
   appEnvironment,
   loadMyAgentSet,
+  archiveItem,
+  isAdministrator,
   type Item,
   type ResponseData,
   type FindingData,
@@ -92,6 +94,11 @@ export default component$(() => {
   // matched against this single key (a verdict write is author-bound to the
   // local agent, mirroring castVote in the pre-refactor code).
   const myAgent = useSignal<string | null>(null);
+  const isAdmin = useSignal(false);
+  const archiving = useSignal(false);
+  const archiveError = useSignal<string | null>(null);
+  const archiveConfirm = useSignal(false);
+  const nav = useNavigate();
   // myAgentSet: every agent key belonging to this user across installs
   // (recognition only — see loadMyAgentSet). Used to recognise whether the user
   // has ALREADY responded from some other linked install, so a reinstalled user
@@ -150,12 +157,14 @@ export default component$(() => {
       item.value = result.item;
       author.value = result.author;
 
-      const [responsesResult, findingsResult] = await Promise.all([
+      const [responsesResult, findingsResult, adminResult] = await Promise.all([
         getItemResponses(hash),
         getItemFindings(hash),
+        isAdministrator(),
       ]);
       responses.value = responsesResult;
       findings.value = findingsResult;
+      isAdmin.value = adminResult;
     } catch (e: any) {
       error.value = formatInvokeError(e, "Failed to load scenario");
     } finally {
@@ -177,6 +186,21 @@ export default component$(() => {
       verdictError.value = formatInvokeError(e, "Failed to record verdict");
     } finally {
       submitting.value = false;
+    }
+  });
+
+  // Archive this scenario (admin-only). On success the item drops out of
+  // get_all_items, so we return to the board where it will no longer appear.
+  const archive = $(async () => {
+    if (!itemHash.value) return;
+    archiveError.value = null;
+    archiving.value = true;
+    try {
+      await archiveItem(itemHash.value);
+      nav("/");
+    } catch (e: any) {
+      archiveError.value = formatInvokeError(e, "Failed to archive scenario");
+      archiving.value = false;
     }
   });
 
@@ -298,6 +322,41 @@ export default component$(() => {
           )}
         </div>
         <h1 class="text-2xl font-bold">{it.title}</h1>
+        {isAdmin.value && (
+          <div class="mt-3">
+            {!archiveConfirm.value ? (
+              <button
+                onClick$={() => (archiveConfirm.value = true)}
+                class="text-xs text-gray-500 hover:text-gray-300 underline underline-offset-2"
+              >
+                Archive this scenario
+              </button>
+            ) : (
+              <div class="flex items-center gap-3 text-xs">
+                <span class="text-gray-400">
+                  Archive this scenario? It will be hidden from the board.
+                </span>
+                <button
+                  onClick$={archive}
+                  disabled={archiving.value}
+                  class="px-2 py-1 rounded bg-amber-700 hover:bg-amber-600 text-white disabled:opacity-50"
+                >
+                  {archiving.value ? "Archiving…" : "Confirm"}
+                </button>
+                <button
+                  onClick$={() => (archiveConfirm.value = false)}
+                  disabled={archiving.value}
+                  class="px-2 py-1 rounded border border-gray-700 text-gray-400 hover:text-gray-200 disabled:opacity-50"
+                >
+                  Cancel
+                </button>
+              </div>
+            )}
+            {archiveError.value && (
+              <p class="mt-2 text-xs text-red-400">{archiveError.value}</p>
+            )}
+          </div>
+        )}
       </div>
 
       <div class="space-y-5">

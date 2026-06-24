@@ -10,6 +10,8 @@ import {
   commitIdentityLink,
   revokeIdentityLink,
   saveProfileCache,
+  addAdministrator,
+  isAdministrator,
 } from "~/lib/holochain";
 
 export default component$(() => {
@@ -20,6 +22,10 @@ export default component$(() => {
   const profilePicture = useContext(profilePictureContext);
   const safeReturnTo = useSignal<string | null>(null);
   const agentKey = useSignal<string | null>(null);
+  const isAdmin = useSignal(false);
+  const becomingAdmin = useSignal(false);
+  const adminGrantMsg = useSignal<string | null>(null);
+  const adminGrantError = useSignal<string | null>(null);
   const linkedVaultKey = useSignal<string | null>(null);
   const loading = useSignal(true);
   const linking = useSignal(false);
@@ -93,6 +99,15 @@ export default component$(() => {
         agent_pub_key: string | null;
       }>("get_app_status");
       agentKey.value = status.agent_pub_key;
+
+      // Surface admin status so the "Become administrator" bootstrap can
+      // show/hide appropriately. Best-effort — a failure here just leaves
+      // isAdmin false, which shows the (harmless) bootstrap button.
+      try {
+        isAdmin.value = await isAdministrator();
+      } catch {
+        isAdmin.value = false;
+      }
 
       // Check if already linked on DHT, then ask Vault for the canonical
       // state. We never auto-revoke from here — the layout banner gives the
@@ -243,6 +258,29 @@ export default component$(() => {
     }
   });
 
+  // Bootstrap self-grant: grant administrator authority to THIS local cell
+  // agent (addAdministrator with no pubkey self-grants host-side). Visible to
+  // any signed-in user; cryptographically effective only for the progenitor
+  // once the progenitor key is burned into DNA properties. This is the
+  // chicken-and-egg breaker — you become admin here, then the gated Admin
+  // control room appears in the nav.
+  const becomeAdmin = $(async () => {
+    adminGrantError.value = null;
+    adminGrantMsg.value = null;
+    becomingAdmin.value = true;
+    try {
+      await addAdministrator();
+      isAdmin.value = await isAdministrator();
+      adminGrantMsg.value = isAdmin.value
+        ? "You're now an administrator."
+        : "Grant submitted, but admin status didn't take. Check the progenitor key.";
+    } catch (e: any) {
+      adminGrantError.value = `Could not become administrator: ${e}`;
+    } finally {
+      becomingAdmin.value = false;
+    }
+  });
+
   return (
     <div class="max-w-xl mx-auto">
       <h1 class="text-2xl font-bold mb-6">Identity</h1>
@@ -297,6 +335,37 @@ export default component$(() => {
             </div>
           )}
 
+          {/* Administrator status / bootstrap self-grant */}
+          <div class="bg-gray-900 border border-gray-800 rounded-lg p-4">
+            {isAdmin.value ? (
+              <div class="flex items-center gap-2 text-sm text-gray-300">
+                <span class="text-emerald-400">&#10003;</span>
+                You&rsquo;re an administrator.
+              </div>
+            ) : (
+              <div class="space-y-3">
+                <p class="text-sm text-gray-300">
+                  This identity isn&rsquo;t an administrator. Administrators can
+                  create and import scenarios and manage the board.
+                </p>
+                <button
+                  type="button"
+                  onClick$={becomeAdmin}
+                  disabled={becomingAdmin.value}
+                  class="bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white font-medium px-4 py-2 rounded-full text-sm"
+                >
+                  {becomingAdmin.value ? "Granting..." : "Become administrator"}
+                </button>
+              </div>
+            )}
+            {adminGrantMsg.value && (
+              <p class="mt-3 text-sm text-emerald-400">{adminGrantMsg.value}</p>
+            )}
+            {adminGrantError.value && (
+              <p class="mt-3 text-sm text-red-400">{adminGrantError.value}</p>
+            )}
+          </div>
+
           {/* Actions */}
           <div class="space-y-3">
             {!confirmUnlink.value ? (
@@ -348,7 +417,7 @@ export default component$(() => {
             {showDetails.value && (
               <div class="mt-2 bg-gray-900 border border-gray-800 rounded-lg p-4 space-y-3">
                 <div>
-                  <p class="text-xs text-gray-500 mb-1">ProofPoll agent key</p>
+                  <p class="text-xs text-gray-500 mb-1">Fieldnotes agent key</p>
                   <p class="font-mono text-xs text-gray-400 break-all">
                     {agentKey.value}
                   </p>
@@ -454,7 +523,7 @@ export default component$(() => {
             </button>
             {showDetails.value && (
               <div class="mt-2 bg-gray-900 border border-gray-800 rounded-lg p-4">
-                <p class="text-xs text-gray-500 mb-1">ProofPoll agent key</p>
+                <p class="text-xs text-gray-500 mb-1">Fieldnotes agent key</p>
                 <p class="font-mono text-xs text-gray-400 break-all">
                   {agentKey.value || "Not available"}
                 </p>

@@ -8,7 +8,7 @@ import {
 import { useNavigate, Link } from "@builder.io/qwik-city";
 import { linkedContext } from "~/lib/context";
 import { setSignInIntent } from "~/lib/signin";
-import { importItems, getAllItems, type CreateItemInput } from "~/lib/holochain";
+import { importItems, getAllItems, getAdminGrantHash, type CreateItemInput } from "~/lib/holochain";
 
 // Canonical target for R&O v0.4.0 (see the test-tracker templates.json).
 const EXPECTED_ITEMS = 57;
@@ -172,7 +172,21 @@ export default component$(() => {
       );
 
       if (toCreate.length > 0) {
-        await importItems(toCreate);
+        // Scenarios are admin-gated: every item must carry the importer's
+        // AdminGrant hash or validate_item rejects it. Fetch once, stamp all.
+        const grantHash = await getAdminGrantHash();
+        if (!grantHash) {
+          importError.value =
+            "You need administrator authority to import scenarios. " +
+            "Become an administrator on the Identity screen first.";
+          importing.value = false;
+          return;
+        }
+        const stamped = toCreate.map((m) => ({
+          ...m,
+          admin_grant_action_hash: grantHash,
+        }));
+        await importItems(stamped);
       }
 
       if (isTest) {
