@@ -267,19 +267,16 @@ pub fn all_x25519_keys_anchor() -> ExternResult<EntryHash> {
 pub fn validate(op: Op) -> ExternResult<ValidateCallbackResult> {
     match op.flattened::<EntryTypes, LinkTypes>()? {
         FlatOp::StoreEntry(store_entry) => match store_entry {
-            OpEntry::CreateEntry { app_entry, .. } | OpEntry::UpdateEntry { app_entry, .. } => {
-                match app_entry {
-                    EntryTypes::AdminGrant(grant) => validate_admin_grant(&grant),
-                    EntryTypes::Item(item) => validate_item(&item),
-                    EntryTypes::Response(_) => Ok(ValidateCallbackResult::Valid),
-                    EntryTypes::Finding(finding) => validate_finding(&finding),
-                    // Companion encryption key and encrypted attachment: the
-                    // cryptography is the access control, not validation. Any
-                    // author may publish their own x25519 key and commit their
-                    // own encrypted attachments.
-                    EntryTypes::AdminX25519Key(_) => Ok(ValidateCallbackResult::Valid),
-                    EntryTypes::EncryptedAttachment(_) => Ok(ValidateCallbackResult::Valid),
-                }
+            // Both Create and Update carry the action (and thus the author),
+            // which validate_item needs to bind a Scenario to the admin named
+            // in its referenced AdminGrant. Create and Update are distinct
+            // types, so we handle them in separate arms and share the inner
+            // entry-type dispatch via validate_entry.
+            OpEntry::CreateEntry { app_entry, action } => {
+                validate_entry(app_entry, &action.author)
+            }
+            OpEntry::UpdateEntry { app_entry, action, .. } => {
+                validate_entry(app_entry, &action.author)
             }
             _ => Ok(ValidateCallbackResult::Valid),
         },
@@ -308,6 +305,25 @@ pub fn validate(op: Op) -> ExternResult<ValidateCallbackResult> {
         },
         FlatOp::RegisterDeleteLink { .. } => Ok(ValidateCallbackResult::Valid),
         _ => Ok(ValidateCallbackResult::Valid),
+    }
+}
+
+/// Dispatch a stored app entry to its type-specific validator, passing the
+/// action author through (needed by validate_item for the Scenario gate).
+fn validate_entry(
+    app_entry: EntryTypes,
+    author: &AgentPubKey,
+) -> ExternResult<ValidateCallbackResult> {
+    match app_entry {
+        EntryTypes::AdminGrant(grant) => validate_admin_grant(&grant),
+        EntryTypes::Item(item) => validate_item(&item, author),
+        EntryTypes::Response(_) => Ok(ValidateCallbackResult::Valid),
+        EntryTypes::Finding(finding) => validate_finding(&finding),
+        // Companion encryption key and encrypted attachment: the cryptography
+        // is the access control, not validation. Any author may publish their
+        // own x25519 key and commit their own encrypted attachments.
+        EntryTypes::AdminX25519Key(_) => Ok(ValidateCallbackResult::Valid),
+        EntryTypes::EncryptedAttachment(_) => Ok(ValidateCallbackResult::Valid),
     }
 }
 
@@ -360,33 +376,44 @@ fn validate_admin_grant(grant: &AdminGrant) -> ExternResult<ValidateCallbackResu
     Ok(ValidateCallbackResult::Valid)
 }
 
-fn validate_item(item: &Item) -> ExternResult<ValidateCallbackResult> {
+fn validate_item(
+    item: &Item,
+    author: &AgentPubKey,
+) -> ExternResult<ValidateCallbackResult> {
     if item.title.trim().is_empty() {
         return Ok(ValidateCallbackResult::Invalid(
             "Item title cannot be empty".to_string(),
         ));
     }
-    
-    // For Scenario items, author must have a valid AdminGrant.
-    // Feedback items are open to all authors.
+
+    // For Scenario items, the AUTHOR must be the admin named in a valid
+    // AdminGrant. Feedback items are open to all authors.
     if item.kind == ItemKind::Scenario {
         if let Some(grant_hash) = &item.admin_grant_action_hash {
-            // Fetch the grant record deterministically (no DHT read, direct hash lookup).
-            // If must_get_valid_record succeeds, the grant already passed validate_admin_grant,
-            // which verified the progenitor signature. We just need to confirm the Item author
-            // matches the admin_pubkey in the grant.
+            // must_get_valid_record fetches the grant deterministically; if it
+            // succeeds the grant already passed validate_admin_grant (progenitor
+            // signature verified). We then bind the Scenario's author to that
+            // grant: referencing someone else's grant is not enough.
             match must_get_valid_record(grant_hash.clone()) {
-                Ok(_grant_record) => {
-                    // Grant exists and is valid. The signature was verified when it was created.
-                    // For now, accept Scenarios as long as a grant action hash is referenced.
-                    // TODO: deserialize the grant entry to verify author == grant.admin_pubkey
+                Ok(grant_record) => {
+                    let grant: AdminGrant = grant_record
+                        .entry()
+                        .to_app_option()
+                        .map_err(|e| wasm_error!(e))?
+                        .ok_or(wasm_error!(
+                            "Referenced AdminGrant record has no entry"
+                        ))?;
+                    if author != &grant.admin_pubkey {
+                        return Ok(ValidateCallbackResult::Invalid(
+                            "Scenario author does not match the admin in the referenced AdminGrant"
+                                .to_string(),
+                        ));
+                    }
                     Ok(ValidateCallbackResult::Valid)
                 }
-                Err(_) => {
-                    Ok(ValidateCallbackResult::Invalid(
-                        "Could not fetch AdminGrant for Item validation".to_string(),
-                    ))
-                }
+                Err(_) => Ok(ValidateCallbackResult::Invalid(
+                    "Could not fetch AdminGrant for Item validation".to_string(),
+                )),
             }
         } else {
             Ok(ValidateCallbackResult::Invalid(

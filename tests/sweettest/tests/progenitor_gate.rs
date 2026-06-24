@@ -115,4 +115,33 @@ async fn progenitor_gate_across_two_agents() {
         "Bob should see Alice's Scenario, saw none"
     );
     println!("Bob sees {} item(s) — cross-peer sync confirmed.", bobs_view.len());
+
+    // 4. Author-binding: Bob cites ALICE's (valid) grant to create a Scenario.
+    //    Alice's grant has synced to Bob by now (await_consistency above), so
+    //    the grant is fetchable on Bob's side — but Bob is NOT the admin it
+    //    names, so validate_item must reject on the author mismatch.
+    let bob_foreign: Result<ActionHash, _> = conductors[1]
+        .call_fallible(
+            &bob.zome("polls"),
+            "create_item",
+            CreateItemInput {
+                kind: ItemKind::Scenario,
+                admin_grant_action_hash: Some(alice_grant.clone()),
+                campaign: "Forged".to_string(),
+                section: "Author-binding".to_string(),
+                title: "Bob's illicit scenario".to_string(),
+                instructions: "Should be rejected — Bob is not the grant's admin.".to_string(),
+                look_for: "rejection".to_string(),
+                order: 99,
+            },
+        )
+        .await;
+    assert!(
+        bob_foreign.is_err(),
+        "Bob citing Alice's grant to create a Scenario must be rejected (author-binding), but it succeeded"
+    );
+    println!(
+        "Bob's foreign-grant Scenario correctly rejected: {:?}",
+        bob_foreign.err()
+    );
 }
