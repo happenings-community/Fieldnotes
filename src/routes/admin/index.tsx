@@ -127,7 +127,6 @@ export default component$(() => {
             </Link>
           </div>
         </section>
-
         {/* ── Archived scenarios ────────────────────────────────────── */}
         <section class="mb-12">
           <h2 class="text-xl font-bold mb-1">Archived scenarios</h2>

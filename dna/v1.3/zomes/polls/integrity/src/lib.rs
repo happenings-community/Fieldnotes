@@ -122,7 +122,9 @@ pub struct Finding {
 /// wrap target for cohort-encrypted attachments. The matching private key is
 /// held in lair (generated via create_x25519_keypair); only the public key is
 /// published here. Identity (who this admin is) is their agent/Vault key; this
-/// is purely their encryption key.
+/// An administrator's published x25519 companion public key. DEAD CODE under
+/// the lair-crypto attachment model (kept temporarily to avoid touching the
+/// enum/anchor during the reshape; sweep after the lair flow works).
 #[hdk_entry_helper]
 #[derive(Clone, PartialEq)]
 pub struct AdminX25519Key {
@@ -130,25 +132,39 @@ pub struct AdminX25519Key {
     pub created_at: i64,
 }
 
-/// One wrapped copy of a content key, for a single recipient in the cohort.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
-pub struct WrappedKey {
-    pub recipient_x: X25519PubKey,
-    pub wrapped: XSalsa20Poly1305EncryptedData,
+pub struct RecipientWrappedKey {
+    /// The recipient's 32-byte Ed25519 agent key (raw, no prefix/location).
+    /// Identifies which admin (or the uploader) this wrapped key is for.
+    pub recipient_ed25519: Vec<u8>,
+    /// 24-byte nonce from lair's crypto_box (for unwrapping the content key).
+    pub nonce: Vec<u8>,
+    /// The 32-byte ring content key, wrapped to this recipient via lair
+    /// crypto_box. Tiny (well under the 8KB lair frame limit) so it is the
+    /// only thing encrypted per-recipient; the image is encrypted once.
+    pub wrapped_key: Vec<u8>,
 }
 
-/// A cohort-encrypted attachment on a Finding. The payload is encrypted once
-/// with a random content key (ciphertext); that content key is wrapped to each
-/// cohort member's x25519 key (wrapped_keys). A recipient locates their entry
-/// by recipient_x, ingests it with their lair-held private key, and decrypts.
-/// Re-wrappable: a later-added admin gets a new WrappedKey appended without
-/// re-encrypting the payload.
+/// A cohort-encrypted attachment on a Finding. The image is encrypted ONCE with
+/// ring (host-side ChaCha20-Poly1305, no IPC frame limit) under a fresh 32-byte
+/// content key. That content key is then wrapped per-recipient via lair's
+/// crypto_box -- each wrap is tiny (32 bytes), well under lair's 8KB frame limit.
+/// A recipient finds their RecipientWrappedKey by matching their agent key,
+/// unwraps the content key with their lair-held key, then ring-decrypts the
+/// single image_ciphertext. The cohort is the set of admins at upload time;
+/// adding an admin later only requires wrapping the 32-byte key to them -- the
+/// image is never re-encrypted.
 #[hdk_entry_helper]
 #[derive(Clone, PartialEq)]
 pub struct EncryptedAttachment {
-    pub ciphertext: XSalsa20Poly1305EncryptedData,
-    pub wrapped_keys: Vec<WrappedKey>,
-    pub sender_x: X25519PubKey,
+    /// The image, ring-encrypted ONCE (ciphertext then 16-byte Poly1305 tag).
+    pub image_ciphertext: Vec<u8>,
+    /// The 12-byte ring nonce used for image_ciphertext.
+    pub bulk_nonce: Vec<u8>,
+    /// Per-recipient wrapped copies of the 32-byte content key.
+    pub per_recipient: Vec<RecipientWrappedKey>,
+    /// The uploader's 32-byte Ed25519 agent key (crypto_box sender for wraps).
+    pub sender_ed25519: Vec<u8>,
     /// Optional MIME-ish hint for display (e.g. "image/png"); no content leak.
     pub media_hint: String,
     pub created_at: i64,

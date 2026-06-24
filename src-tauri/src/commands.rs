@@ -2233,3 +2233,246 @@ fn read_lair_backup_fields(data_dir: &Path) -> Option<(String, String, String)> 
     let store_b64 = base64::engine::general_purpose::STANDARD.encode(&store_bytes);
     Some((passphrase, config_yaml, store_b64))
 }
+
+// ── Encrypted attachment commands ──────────────────────────────────────
+//
+// Image bytes are encrypted HOST-SIDE via lair's crypto_box (no 8KB limit),
+// once per recipient (each current admin + the uploader). The zome only stores
+// the assembled per-recipient ciphers. No x25519 publishing — lair uses the
+// agent's Ed25519 key directly (converting to X25519 internally).
+
+/// Mirrors RecipientWrappedKey in the coordinator zome.
+#[derive(serde::Serialize, serde::Deserialize, Debug, Clone)]
+pub struct RecipientWrappedKey {
+    pub recipient_ed25519: Vec<u8>,
+    pub nonce: Vec<u8>,
+    pub wrapped_key: Vec<u8>,
+}
+
+/// Mirrors StoreAttachmentInput in the coordinator zome.
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+pub struct StoreAttachmentInput {
+    pub finding_action_hash: ActionHash,
+    pub image_ciphertext: Vec<u8>,
+    pub bulk_nonce: Vec<u8>,
+    pub per_recipient: Vec<RecipientWrappedKey>,
+    pub sender_ed25519: Vec<u8>,
+    pub media_hint: String,
+}
+
+/// Extract the 32-byte Ed25519 key from an AgentPubKey (3-byte prefix +
+/// 32-byte key + 4-byte DHT location).
+fn ed25519_bytes_from_agent(agent: &AgentPubKey) -> [u8; 32] {
+    let raw = agent.get_raw_39();
+    let mut bytes = [0u8; 32];
+    bytes.copy_from_slice(&raw[3..35]);
+    bytes
+}
+
+/// Create an encrypted attachment on a finding (ring-hybrid). The image is
+/// encrypted ONCE host-side with ring (bulk_encrypt, no 8KB limit) under a
+/// fresh 32-byte content key. That content key is then wrapped to each
+/// recipient (every current admin plus the uploader) via lair's crypto_box --
+/// 32 bytes per wrap, comfortably under lair's 8KB frame limit. The cohort is
+/// the admin set at upload time; adding an admin later only needs a re-wrap of
+/// the 32-byte key, never a re-encrypt of the image.
+#[tauri::command]
+pub async fn create_encrypted_attachment(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    finding_action_hash: String,
+    base64_bytes: String,
+    media_hint: String,
+) -> Result<String, String> {
+    if load_identity_link(&state.data_dir).is_none() {
+        return Err("Sign in with Flowsta to add an attachment".to_string());
+    }
+    let finding_hash = ActionHash::try_from(finding_action_hash)
+        .map_err(|e| format!("Invalid finding hash: {:?}", e))?;
+
+    // Decode the base64 image to raw bytes.
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(base64_bytes.as_bytes())
+        .map_err(|e| format!("Invalid base64 attachment: {:?}", e))?;
+
+    // The uploader's Ed25519 key (crypto_box sender).
+    let sender_ed = get_agent_ed25519_bytes(&state)?;
+
+    // Gather the cohort first (app client only): current admins + uploader.
+    let admin_keys: Vec<AgentPubKey> = {
+        let client = state.app_client.lock().await;
+        let client = client.as_ref().ok_or("Conductor not ready")?;
+        let payload = ExternIO::encode(()).map_err(|e| e.to_string())?;
+        let result = call_zome(client, POLLS_ZOME, "get_administrators", payload).await?;
+        result.decode().map_err(|e| e.to_string())?
+    };
+
+    // Build the recipient set as 32-byte Ed25519 keys, deduped, including self.
+    let mut recipients: Vec<[u8; 32]> = vec![sender_ed];
+    for ak in &admin_keys {
+        let eb = ed25519_bytes_from_agent(ak);
+        if !recipients.contains(&eb) {
+            recipients.push(eb);
+        }
+    }
+
+    // Ring-hybrid. Encrypt the image ONCE with ring (host-side, no lair, no
+    // 8KB limit) under a fresh single-use content key.
+    let (content_key, bulk_nonce, image_ciphertext) =
+        crate::crypto::bulk_encrypt(&bytes)?;
+
+    // Wrap the 32-byte content key to each recipient via lair. Each wrap is
+    // tiny (32 bytes), well under lair's 8KB limit. Hold the lair lock only
+    // for the wrapping, release before the store zome call.
+    let per_recipient: Vec<RecipientWrappedKey> = {
+        let lair = state.lair_client.lock().await;
+        let lair = lair.as_ref().ok_or("Lair not connected")?;
+        let mut out: Vec<RecipientWrappedKey> = Vec::new();
+        for recipient_ed in recipients {
+            let (nonce, wrapped_key) =
+                crate::crypto::encrypt_to_agent(lair, sender_ed, recipient_ed, &content_key)
+                    .await?;
+            out.push(RecipientWrappedKey {
+                recipient_ed25519: recipient_ed.to_vec(),
+                nonce: nonce.to_vec(),
+                wrapped_key,
+            });
+        }
+        out
+    };
+
+    // Store the assembled attachment via the zome (no crypto in the zome).
+    let client = state.app_client.lock().await;
+    let client = client.as_ref().ok_or("Conductor not ready")?;
+    let input = StoreAttachmentInput {
+        finding_action_hash: finding_hash,
+        image_ciphertext,
+        bulk_nonce: bulk_nonce.to_vec(),
+        per_recipient,
+        sender_ed25519: sender_ed.to_vec(),
+        media_hint,
+    };
+    let payload = ExternIO::encode(input).map_err(|e| e.to_string())?;
+    let result =
+        call_zome(client, POLLS_ZOME, "store_encrypted_attachment", payload).await?;
+    let hash: ActionHash = result.decode().map_err(|e| e.to_string())?;
+    Ok(hash.to_string())
+}
+
+/// List attachment action hashes on a finding. The frontend decrypts each via
+/// decrypt_attachment.
+#[tauri::command]
+pub async fn get_finding_attachments(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    finding_action_hash: String,
+) -> Result<Vec<String>, String> {
+    let finding_hash = ActionHash::try_from(finding_action_hash)
+        .map_err(|e| format!("Invalid finding hash: {:?}", e))?;
+
+    let client = state.app_client.lock().await;
+    let client = client.as_ref().ok_or("Conductor not ready")?;
+
+    let payload = ExternIO::encode(finding_hash).map_err(|e| e.to_string())?;
+    let result =
+        call_zome(client, POLLS_ZOME, "get_finding_attachments", payload).await?;
+    let records: Vec<Record> = result.decode().map_err(|e| e.to_string())?;
+
+    let hashes = records
+        .iter()
+        .map(|r| r.signed_action.hashed.hash.to_string())
+        .collect();
+    Ok(hashes)
+}
+
+/// Decrypt an attachment the caller is a recipient of (ring-hybrid). Fetches
+/// the attachment, finds the RecipientWrappedKey matching the caller's Ed25519
+/// agent key, unwraps the 32-byte content key via lair, then ring-decrypts the
+/// single image_ciphertext. Returns the plaintext bytes as base64.
+#[tauri::command]
+pub async fn decrypt_attachment(
+    state: tauri::State<'_, std::sync::Arc<AppState>>,
+    attachment_action_hash: String,
+) -> Result<String, String> {
+    let attachment_hash = ActionHash::try_from(attachment_action_hash)
+        .map_err(|e| format!("Invalid attachment hash: {:?}", e))?;
+
+    // The caller's Ed25519 key (must match a RecipientWrappedKey).
+    let recipient_ed = get_agent_ed25519_bytes(&state)?;
+
+    // Fetch the attachment record from the zome.
+    let record: Record = {
+        let client = state.app_client.lock().await;
+        let client = client.as_ref().ok_or("Conductor not ready")?;
+        // get_finding_attachments returns hashes; here we fetch one attachment
+        // directly via a small get. Reuse the zome's record fetch by calling
+        // get_finding_attachments is per-finding, so instead decode via get.
+        let payload = ExternIO::encode(attachment_hash.clone())
+            .map_err(|e| e.to_string())?;
+        let result =
+            call_zome(client, POLLS_ZOME, "get_attachment_record", payload).await?;
+        let maybe: Option<Record> = result.decode().map_err(|e| e.to_string())?;
+        maybe.ok_or("Attachment not found")?
+    };
+
+    // Decode the EncryptedAttachment entry.
+    let attachment: EncryptedAttachmentData = decode_entry(&record)?;
+
+    // Find this caller's wrapped content key.
+    let mine = attachment
+        .per_recipient
+        .iter()
+        .find(|rc| rc.recipient_ed25519 == recipient_ed.to_vec())
+        .ok_or("You are not a recipient of this attachment.")?;
+
+    // Reconstruct sender + nonce, decrypt via lair.
+    let mut sender_ed = [0u8; 32];
+    if attachment.sender_ed25519.len() != 32 {
+        return Err("Malformed attachment sender key".to_string());
+    }
+    sender_ed.copy_from_slice(&attachment.sender_ed25519);
+
+    let mut nonce = [0u8; 24];
+    if mine.nonce.len() != 24 {
+        return Err("Malformed attachment key-wrap nonce".to_string());
+    }
+    nonce.copy_from_slice(&mine.nonce);
+
+    // Stage 1: unwrap the 32-byte content key via lair (small, under 8KB).
+    // Drop the lair lock before ring-decrypting (ring needs no lair).
+    let content_key_vec = {
+        let lair = state.lair_client.lock().await;
+        let lair = lair.as_ref().ok_or("Lair not ready")?;
+        crate::crypto::decrypt_as_recipient(
+            lair, sender_ed, recipient_ed, nonce, &mine.wrapped_key,
+        )
+        .await?
+    };
+    if content_key_vec.len() != 32 {
+        return Err("Malformed unwrapped content key".to_string());
+    }
+    let mut content_key = [0u8; 32];
+    content_key.copy_from_slice(&content_key_vec);
+
+    // Stage 2: ring-decrypt the single image_ciphertext with the content key.
+    if attachment.bulk_nonce.len() != 12 {
+        return Err("Malformed bulk nonce".to_string());
+    }
+    let mut bulk_nonce = [0u8; 12];
+    bulk_nonce.copy_from_slice(&attachment.bulk_nonce);
+    let plaintext =
+        crate::crypto::bulk_decrypt(&content_key, &bulk_nonce, &attachment.image_ciphertext)?;
+
+    Ok(base64::engine::general_purpose::STANDARD.encode(&plaintext))
+}
+
+/// Host-side mirror of EncryptedAttachment for decoding.
+#[derive(serde::Deserialize, Debug)]
+struct EncryptedAttachmentData {
+    pub image_ciphertext: Vec<u8>,
+    pub bulk_nonce: Vec<u8>,
+    pub per_recipient: Vec<RecipientWrappedKey>,
+    pub sender_ed25519: Vec<u8>,
+    #[allow(dead_code)]
+    pub media_hint: String,
+    #[allow(dead_code)]
+    pub created_at: i64,
+}

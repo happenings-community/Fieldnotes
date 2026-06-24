@@ -194,6 +194,41 @@ export async function unarchiveItem(actionHash: string): Promise<string> {
   return invoke<string>("unarchive_item", { actionHash });
 }
 
+// ── Encrypted attachments ──────────────────────────────────────────────
+// Cohort-scoped encrypted attachments on findings. Encryption happens
+// host-side (ring for the image, lair to wrap the content key per admin);
+// the frontend sends/receives plaintext bytes (as base64) and hashes.
+
+/// Encrypt `bytes` (base64) and store as an attachment on a finding. The host
+/// encrypts the image once with ring and wraps the content key to each current
+/// admin plus the uploader. Returns the attachment action hash.
+export async function createEncryptedAttachment(
+  findingActionHash: string,
+  base64Bytes: string,
+  mediaHint: string,
+): Promise<string> {
+  return invoke<string>("create_encrypted_attachment", {
+    findingActionHash,
+    base64Bytes,
+    mediaHint,
+  });
+}
+
+/// List attachment action hashes on a finding (no plaintext).
+export async function getFindingAttachments(
+  findingActionHash: string,
+): Promise<string[]> {
+  return invoke<string[]>("get_finding_attachments", { findingActionHash });
+}
+
+/// Decrypt an attachment the caller is in the cohort for. Returns the
+/// plaintext bytes as base64 (the caller turns it back into an image/blob).
+export async function decryptAttachment(
+  attachmentActionHash: string,
+): Promise<string> {
+  return invoke<string>("decrypt_attachment", { attachmentActionHash });
+}
+
 export async function createItem(input: CreateItemInput): Promise<string> {
   // Top-level args: Tauri maps camelCase -> snake_case, so send `lookFor`.
   return invoke<string>("create_item", {

@@ -550,13 +550,13 @@ pub fn get_admin_x25519_keys(_: ()) -> ExternResult<Vec<X25519PubKey>> {
     let anchor = all_x25519_keys_anchor()?;
     let links = get_links(
         LinkQuery::try_new(anchor, LinkTypes::AllAdminX25519Keys)?,
-        GetStrategy::default(),
+        GetStrategy::Local,
     )?;
     let mut keys: Vec<X25519PubKey> = Vec::new();
     for link in links {
         let hash = ActionHash::try_from(link.target)
             .map_err(|_| wasm_error!("Invalid x25519 key link target"))?;
-        if let Some(record) = get(hash, GetOptions::default())? {
+        if let Some(record) = get(hash, GetOptions::local())? {
             if let Ok(k) = AdminX25519Key::try_from(record) {
                 if !keys.contains(&k.x25519_pubkey) {
                     keys.push(k.x25519_pubkey);
@@ -567,27 +567,63 @@ pub fn get_admin_x25519_keys(_: ()) -> ExternResult<Vec<X25519PubKey>> {
     Ok(keys)
 }
 
+/// Return the x25519 public key THIS agent published (the one uploaders wrap
+/// to, so it's the correct recipient key for decrypt). Looks up the agent's
+/// own AdminX25519Key entry via the anchor link it authored. Returns the most
+/// recent if the agent published more than once. None if never published.
+#[hdk_extern]
+pub fn get_my_published_x25519_key(_: ()) -> ExternResult<Option<X25519PubKey>> {
+    let me = agent_info()?.agent_initial_pubkey;
+    let anchor = all_x25519_keys_anchor()?;
+    let links = get_links(
+        LinkQuery::try_new(anchor, LinkTypes::AllAdminX25519Keys)?,
+        GetStrategy::Local,
+    )?;
+
+    // Keep only links this agent authored, newest first by timestamp.
+    let mut mine: Vec<(Timestamp, ActionHash)> = Vec::new();
+    for link in links {
+        if link.author == me {
+            if let Ok(hash) = ActionHash::try_from(link.target) {
+                mine.push((link.timestamp, hash));
+            }
+        }
+    }
+    mine.sort_by(|a, b| b.0.cmp(&a.0)); // newest first
+
+    for (_, hash) in mine {
+        if let Some(record) = get(hash, GetOptions::local())? {
+            if let Ok(k) = AdminX25519Key::try_from(record) {
+                return Ok(Some(k.x25519_pubkey));
+            }
+        }
+    }
+    Ok(None)
+}
+
 #[derive(Serialize, Deserialize, Debug)]
 pub struct StoreAttachmentInput {
     pub finding_action_hash: ActionHash,
-    pub ciphertext: XSalsa20Poly1305EncryptedData,
-    pub wrapped_keys: Vec<WrappedKey>,
-    pub sender_x: X25519PubKey,
+    pub image_ciphertext: Vec<u8>,
+    pub bulk_nonce: Vec<u8>,
+    pub per_recipient: Vec<RecipientWrappedKey>,
+    pub sender_ed25519: Vec<u8>,
     pub media_hint: String,
 }
 
-/// Commit a pre-encrypted, pre-wrapped attachment and link it to its finding.
-/// The host has already done create -> wrap-per-cohort via the crypto_*
-/// functions; this only stores the result.
+/// Commit a pre-encrypted attachment (encrypted host-side via lair, once per
+/// recipient) and link it to its finding. The zome carries no crypto — it only
+/// stores the result the host assembled.
 #[hdk_extern]
 pub fn store_encrypted_attachment(input: StoreAttachmentInput) -> ExternResult<ActionHash> {
-    get(input.finding_action_hash.clone(), GetOptions::default())?
+    get(input.finding_action_hash.clone(), GetOptions::local())?
         .ok_or(wasm_error!("Finding not found"))?;
     let now = sys_time()?.as_seconds_and_nanos().0;
     let attachment = EncryptedAttachment {
-        ciphertext: input.ciphertext,
-        wrapped_keys: input.wrapped_keys,
-        sender_x: input.sender_x,
+        image_ciphertext: input.image_ciphertext,
+        bulk_nonce: input.bulk_nonce,
+        per_recipient: input.per_recipient,
+        sender_ed25519: input.sender_ed25519,
         media_hint: input.media_hint,
         created_at: now,
     };
@@ -607,123 +643,21 @@ pub fn store_encrypted_attachment(input: StoreAttachmentInput) -> ExternResult<A
 pub fn get_finding_attachments(finding_action_hash: ActionHash) -> ExternResult<Vec<Record>> {
     let links = get_links(
         LinkQuery::try_new(finding_action_hash, LinkTypes::FindingToAttachment)?,
-        GetStrategy::default(),
+        GetStrategy::Local,
     )?;
     let mut records = Vec::new();
     for link in links {
         let hash = ActionHash::try_from(link.target)
             .map_err(|_| wasm_error!("Invalid attachment link target"))?;
-        if let Some(record) = get(hash, GetOptions::default())? {
+        if let Some(record) = get(hash, GetOptions::local())? {
             records.push(record);
         }
     }
     Ok(records)
 }
 
-// ── Option A orchestrators: encrypt-and-store / fetch-and-decrypt in-zome ──
-//
-// These reuse the proven primitives (create_random / encrypt / export /
-// ingest / decrypt) in one zome call each, so the host never marshals crypto
-// types across the Tauri boundary — only Vec<u8> plaintext and String hashes.
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct CreateEncryptedAttachmentInput {
-    pub finding_action_hash: ActionHash,
-    pub plaintext: Vec<u8>,
-    /// The uploader's x25519 public key (the wrap sender). The matching
-    /// private key must be in this agent's lair (from a prior
-    /// publish_my_x25519_key / crypto_new_x25519 call).
-    pub sender_x: X25519PubKey,
-    pub media_hint: String,
-}
-
-/// Encrypt the payload once, wrap the content key to every published cohort
-/// x25519 key (plus the sender, so the uploader can re-read), commit the
-/// EncryptedAttachment, link it to the finding. One zome call; proven
-/// primitives looped internally.
+/// Fetch a single attachment record by its action hash (host decrypts it).
 #[hdk_extern]
-pub fn create_encrypted_attachment(
-    input: CreateEncryptedAttachmentInput,
-) -> ExternResult<ActionHash> {
-    // Finding must exist.
-    get(input.finding_action_hash.clone(), GetOptions::default())?
-        .ok_or(wasm_error!("Finding not found"))?;
-
-    // 1. Random content key + encrypt payload once.
-    let key_ref = x_salsa20_poly1305_shared_secret_create_random(None)?;
-    let ciphertext =
-        x_salsa20_poly1305_encrypt(key_ref.clone(), XSalsa20Poly1305Data::from(input.plaintext))?;
-
-    // 2. Gather the cohort: every published x25519 key, plus the sender's own.
-    let mut recipients = get_admin_x25519_keys(())?;
-    if !recipients.contains(&input.sender_x) {
-        recipients.push(input.sender_x.clone());
-    }
-
-    // 3. Wrap the content key to each recipient.
-    let mut wrapped_keys: Vec<WrappedKey> = Vec::new();
-    for recipient_x in recipients {
-        let wrapped = x_salsa20_poly1305_shared_secret_export(
-            input.sender_x.clone(),
-            recipient_x.clone(),
-            key_ref.clone(),
-        )?;
-        wrapped_keys.push(WrappedKey { recipient_x, wrapped });
-    }
-
-    // 4. Commit + link.
-    let now = sys_time()?.as_seconds_and_nanos().0;
-    let attachment = EncryptedAttachment {
-        ciphertext,
-        wrapped_keys,
-        sender_x: input.sender_x,
-        media_hint: input.media_hint,
-        created_at: now,
-    };
-    let hash = create_entry(&EntryZomes::Integrity(EntryTypes::EncryptedAttachment(attachment)))?;
-    create_link(
-        input.finding_action_hash,
-        hash.clone(),
-        LinkTypes::FindingToAttachment,
-        (),
-    )?;
-    Ok(hash)
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct DecryptAttachmentInput {
-    pub attachment_action_hash: ActionHash,
-    /// The caller's x25519 public key (matching a WrappedKey on the attachment).
-    /// The private key must be in the caller's lair.
-    pub recipient_x: X25519PubKey,
-}
-
-/// Fetch an attachment, find the WrappedKey for this caller, ingest it, and
-/// decrypt the payload. Returns the plaintext bytes. Errors if the caller has
-/// no wrapped key on this attachment (not in the cohort).
-#[hdk_extern]
-pub fn decrypt_attachment(input: DecryptAttachmentInput) -> ExternResult<Vec<u8>> {
-    let record = get(input.attachment_action_hash, GetOptions::default())?
-        .ok_or(wasm_error!("Attachment not found"))?;
-    let attachment = EncryptedAttachment::try_from(record)?;
-
-    // Find this caller's wrapped key.
-    let wrapped = attachment
-        .wrapped_keys
-        .iter()
-        .find(|wk| wk.recipient_x == input.recipient_x)
-        .ok_or(wasm_error!("No wrapped key for this recipient (not in cohort)"))?
-        .wrapped
-        .clone();
-
-    // Ingest (using caller's lair-held private key) + decrypt.
-    let key_ref = x_salsa20_poly1305_shared_secret_ingest(
-        input.recipient_x,
-        attachment.sender_x,
-        wrapped,
-        None,
-    )?;
-    let data = x_salsa20_poly1305_decrypt(key_ref, attachment.ciphertext)?
-        .ok_or(wasm_error!("decrypt returned None"))?;
-    Ok(data.as_ref().to_vec())
+pub fn get_attachment_record(attachment_action_hash: ActionHash) -> ExternResult<Option<Record>> {
+    get(attachment_action_hash, GetOptions::local())
 }
