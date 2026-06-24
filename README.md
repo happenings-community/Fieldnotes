@@ -62,6 +62,20 @@ You only need to do this once. (Double-clicking the first time will *not* give y
 3. The **Scenarios** board fills in as it syncs from the network. Work through the scenarios — record a verdict, add findings, corroborate what others have hit.
 4. File anything that no scenario covered under **Report**.
 
+### Seeding scenarios (for administrators)
+
+If you are setting up a network and need to load the scenario set:
+
+1. Become an administrator (the first administrator self-grants from the
+   **Identity** screen), then **reload the app**. The admin tools will not
+   appear until you reload — the grant itself succeeds, but the running UI
+   only re-checks your admin status on a refresh.
+2. Import the scenarios from the raw test-tracker file. The importer expects
+   the original `templates.json` format (fields `stepId`, `testArea`,
+   `stepAction`, `lookFor`) — paste or upload that file directly. It is
+   **not** markdown and not a pre-converted file; the app maps the fields and
+   applies the administrator gate internally.
+
 ---
 
 ## How it's built
