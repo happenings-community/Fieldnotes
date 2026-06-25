@@ -285,7 +285,7 @@ pub fn validate(op: Op) -> ExternResult<ValidateCallbackResult> {
             base_address,
             target_address: _,
             tag: _,
-            action: _,
+            action,
         } => match link_type {
             LinkTypes::AllItems => {
                 let anchor = all_items_anchor()?;
@@ -300,7 +300,26 @@ pub fn validate(op: Op) -> ExternResult<ValidateCallbackResult> {
             LinkTypes::ItemToFindings => Ok(ValidateCallbackResult::Valid),
             LinkTypes::AdminToGrant => Ok(ValidateCallbackResult::Valid),
             LinkTypes::AllAdmins => Ok(ValidateCallbackResult::Valid),
-            LinkTypes::FindingToAttachment => Ok(ValidateCallbackResult::Valid),
+            LinkTypes::FindingToAttachment => {
+                // A FindingToAttachment link attaches an encrypted attachment to
+                // a Finding. Require the link author to be the FINDING's author:
+                // you may only attach evidence to your OWN finding. Corroboration
+                // ("me too, here is my screenshot") is done by creating your own
+                // finding on the shared Item and attaching to that — not by
+                // writing into someone else's finding.
+                let finding_hash = ActionHash::try_from(base_address.clone()).map_err(|_| {
+                    wasm_error!("FindingToAttachment base must be a Finding action hash")
+                })?;
+                let finding_record = must_get_valid_record(finding_hash)?;
+                let finding_author = finding_record.action().author().clone();
+                if action.author != finding_author {
+                    return Ok(ValidateCallbackResult::Invalid(
+                        "An attachment may only be linked to a finding by that finding's author"
+                            .to_string(),
+                    ));
+                }
+                Ok(ValidateCallbackResult::Valid)
+            }
             LinkTypes::AllAdminX25519Keys => Ok(ValidateCallbackResult::Valid),
         },
         FlatOp::RegisterDeleteLink { .. } => Ok(ValidateCallbackResult::Valid),

@@ -34,6 +34,29 @@ struct CreateItemInput {
     order: u32,
 }
 
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct CreateFindingInput {
+    item_action_hash: ActionHash,
+    text: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct StoreAttachmentInput {
+    finding_action_hash: ActionHash,
+    image_ciphertext: Vec<u8>,
+    bulk_nonce: Vec<u8>,
+    per_recipient: Vec<RecipientWrappedKey>,
+    sender_ed25519: Vec<u8>,
+    media_hint: String,
+}
+
+#[derive(serde::Serialize, serde::Deserialize, Debug)]
+struct RecipientWrappedKey {
+    recipient_ed25519: Vec<u8>,
+    nonce: Vec<u8>,
+    wrapped_key: Vec<u8>,
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn progenitor_gate_across_two_agents() {
     let (conductors, alice, bob, alice_key) = setup_two_agents_with_progenitor().await;
@@ -143,5 +166,73 @@ async fn progenitor_gate_across_two_agents() {
     println!(
         "Bob's foreign-grant Scenario correctly rejected: {:?}",
         bob_foreign.err()
+    );
+
+    // 5. Attach-to-own-finding. Alice and Bob each create a finding on the
+    //    shared Item (findings are open to all). Bob attaching to ALICE's
+    //    finding must be REJECTED (link author Bob != finding author Alice).
+    let alice_finding: ActionHash = conductors[0]
+        .call(
+            &alice.zome("polls"),
+            "create_finding",
+            CreateFindingInput {
+                item_action_hash: item_hash.clone(),
+                text: "Alice's finding".to_string(),
+            },
+        )
+        .await;
+    let bob_finding: ActionHash = conductors[1]
+        .call(
+            &bob.zome("polls"),
+            "create_finding",
+            CreateFindingInput {
+                item_action_hash: item_hash.clone(),
+                text: "Bob's corroborating finding".to_string(),
+            },
+        )
+        .await;
+    await_consistency(60, [&alice, &bob])
+        .await
+        .expect("DHT consistency (findings)");
+
+    let dummy_attachment = |finding: ActionHash| StoreAttachmentInput {
+        finding_action_hash: finding,
+        image_ciphertext: vec![1, 2, 3],
+        bulk_nonce: vec![0u8; 12],
+        per_recipient: vec![],
+        sender_ed25519: vec![0u8; 32],
+        media_hint: "image/png".to_string(),
+    };
+
+    // Bob -> Alice's finding: must be rejected by the FindingToAttachment
+    // link validation (author-binding).
+    let bob_to_alice: Result<ActionHash, _> = conductors[1]
+        .call_fallible(
+            &bob.zome("polls"),
+            "store_encrypted_attachment",
+            dummy_attachment(alice_finding.clone()),
+        )
+        .await;
+    assert!(
+        bob_to_alice.is_err(),
+        "Bob attaching to Alice's finding must be rejected (attach-to-own-finding), but it succeeded"
+    );
+    println!(
+        "Bob's attachment to Alice's finding correctly rejected: {:?}",
+        bob_to_alice.err()
+    );
+
+    // 6. Positive: Bob attaching to his OWN finding must SUCCEED — this is the
+    //    corroboration-with-evidence path ("me too, here's my screenshot").
+    let bob_to_own: ActionHash = conductors[1]
+        .call(
+            &bob.zome("polls"),
+            "store_encrypted_attachment",
+            dummy_attachment(bob_finding.clone()),
+        )
+        .await;
+    println!(
+        "Bob's attachment to his own finding succeeded: {:?} — corroboration-with-evidence works.",
+        bob_to_own
     );
 }
