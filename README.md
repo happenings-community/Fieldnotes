@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="src-tauri/icons/source.svg" alt="Fieldnotes" width="120" />
+</p>
+
 # Fieldnotes
 
 **A Holochain desktop app for structured scenario testing — run a shared script of test scenarios, record what you find, and have every finding live on a peer-to-peer network owned by the people doing the testing.**
