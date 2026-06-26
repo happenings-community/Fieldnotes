@@ -1,8 +1,8 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Fieldnotes",
-  "version": "0.1.1",
-  "identifier": "com.proofpoll.app",
+  "version": "0.1.2",
+  "identifier": "com.fieldnotes.app",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:5174",
@@ -30,8 +30,8 @@
     "active": true,
     "targets": "all",
     "externalBin": [
-      "binaries/proofpoll-holochain",
-      "binaries/proofpoll-lair-keystore"
+      "binaries/fieldnotes-holochain",
+      "binaries/fieldnotes-lair-keystore"
     ],
     "resources": [
       "resources/proofpoll_v1_3_happ.happ"

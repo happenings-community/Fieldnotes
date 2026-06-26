@@ -1,8 +1,8 @@
 name: Build Release
 
-# Tag-driven release. Push a `proofpoll-v<version>` tag to build + publish
+# Tag-driven release. Push a `fieldnotes-v<version>` tag to build + publish
 # installers for Linux, macOS (Intel + Apple Silicon), and Windows. Tags
-# with a hyphen suffix (e.g. proofpoll-v1.4.0-beta1) are published as
+# with a hyphen suffix (e.g. fieldnotes-v1.4.0-beta1) are published as
 # pre-releases.
 #
 # ## Bootstrap configuration (production releases)
@@ -30,7 +30,7 @@ name: Build Release
 on:
   push:
     tags:
-      - "proofpoll-v*.*.*"
+      - "fieldnotes-v*.*.*"
 
 permissions:
   contents: write
@@ -45,7 +45,7 @@ jobs:
 
       - name: Get version from tag
         id: version
-        run: echo "version=${GITHUB_REF_NAME#proofpoll-v}" >> $GITHUB_OUTPUT
+        run: echo "version=${GITHUB_REF_NAME#fieldnotes-v}" >> $GITHUB_OUTPUT
 
       - name: Create GitHub Release
         id: create-release
@@ -53,12 +53,12 @@ jobs:
         with:
           script: |
             const version = "${{ steps.version.outputs.version }}";
-            // Tags like proofpoll-v1.4.0 are stable; -betaN / -rcN are
+            // Tags like fieldnotes-v1.4.0 are stable; -betaN / -rcN are
             // pre-releases. Marking pre-releases correctly keeps them out
             // of GitHub's "Latest" slot when published.
             const isPrerelease = version.includes('-');
             const body = [
-              `## ProofPoll v${version}`,
+              `## Fieldnotes v${version}`,
               '',
               "**Verified polls that can't be faked, censored, or quietly rewritten — running on your own machine, owned by the people who use them.**",
               '',
@@ -86,7 +86,7 @@ jobs:
               owner: context.repo.owner,
               repo: context.repo.repo,
               tag_name: context.ref.replace('refs/tags/', ''),
-              name: `ProofPoll v${version}`,
+              name: `Fieldnotes v${version}`,
               body,
               draft: true,
               prerelease: isPrerelease,
@@ -179,9 +179,9 @@ jobs:
       # publishes binaries for all four target triples; lair-keystore ships
       # in the same release (the 0.6.3 lair that 0.6.1 pins).
       #
-      # We rename the binaries to a `proofpoll-` prefix on download so
+      # We rename the binaries to a `fieldnotes-` prefix on download so
       # the resulting .deb / .msi etc. ship them as
-      # /usr/bin/proofpoll-{holochain,lair-keystore} — avoiding the
+      # /usr/bin/fieldnotes-{holochain,lair-keystore} — avoiding the
       # collision with other Tauri/Holochain apps (e.g. Flowsta Vault)
       # that also ship binaries with the bare names.
       - name: Fetch Holochain 0.6.1 binaries (Unix)
@@ -192,7 +192,7 @@ jobs:
           mkdir -p src-tauri/binaries
           base="https://github.com/holochain/holochain/releases/download/${HC_RELEASE}"
           for bin in holochain lair-keystore; do
-            dest="src-tauri/binaries/proofpoll-${bin}-${{ matrix.target }}"
+            dest="src-tauri/binaries/fieldnotes-${bin}-${{ matrix.target }}"
             curl -fsSL "${base}/${bin}-${{ matrix.target }}" -o "$dest"
             chmod +x "$dest"
             test "$(wc -c < "$dest")" -gt 1000000 || { echo "$bin download too small"; exit 1; }
@@ -208,7 +208,7 @@ jobs:
           $base = "https://github.com/holochain/holochain/releases/download/$env:HC_RELEASE"
           $t = "${{ matrix.target }}"
           foreach ($bin in "holochain","lair-keystore") {
-            $dest = "src-tauri/binaries/proofpoll-$bin-$t.exe"
+            $dest = "src-tauri/binaries/fieldnotes-$bin-$t.exe"
             Invoke-WebRequest "$base/$bin-$t.exe" -OutFile $dest
             if ((Get-Item $dest).Length -lt 1000000) { throw "$bin download too small" }
           }
@@ -263,7 +263,7 @@ jobs:
           Expand-Archive -Path $zip -DestinationPath $dest -Force
           "CODE_SIGN_TOOL_DIR=$dest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
-      # Pre-release tags (e.g. proofpoll-v1.4.0-beta1) skip the MSI bundle
+      # Pre-release tags (e.g. fieldnotes-v1.4.0-beta1) skip the MSI bundle
       # on Windows: the MSI bundler rejects non-numeric pre-release
       # identifiers. NSIS has no such restriction.
       - name: Compute Tauri bundle args
@@ -271,7 +271,7 @@ jobs:
         shell: bash
         run: |
           EXTRA=""
-          VERSION="${GITHUB_REF_NAME#proofpoll-v}"
+          VERSION="${GITHUB_REF_NAME#fieldnotes-v}"
           if [[ "$RUNNER_OS" == "Windows" ]] && [[ "$VERSION" == *-* ]]; then
             EXTRA=" --bundles nsis"
             echo "Pre-release detected ($VERSION) — skipping MSI bundle on Windows"
@@ -328,7 +328,7 @@ jobs:
             // their filename ("ProofPoll_aarch64.app.tar.gz"); inject it
             // in the rename so they end up consistent with the .dmg
             // naming.
-            const version = context.ref.replace('refs/tags/proofpoll-v', '');
+            const version = context.ref.replace('refs/tags/fieldnotes-v', '');
 
             const renames = {
               '_aarch64.dmg': '-macOS-Apple-Silicon.dmg',
