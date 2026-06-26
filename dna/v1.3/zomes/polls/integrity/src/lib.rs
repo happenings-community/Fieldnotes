@@ -143,15 +143,6 @@ pub struct Finding {
 /// held in lair (generated via create_x25519_keypair); only the public key is
 /// published here. Identity (who this admin is) is their agent/Vault key; this
 /// An administrator's published x25519 companion public key. DEAD CODE under
-/// the lair-crypto attachment model (kept temporarily to avoid touching the
-/// enum/anchor during the reshape; sweep after the lair flow works).
-#[hdk_entry_helper]
-#[derive(Clone, PartialEq)]
-pub struct AdminX25519Key {
-    pub x25519_pubkey: X25519PubKey,
-    pub created_at: i64,
-}
-
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct RecipientWrappedKey {
     /// The recipient's 32-byte Ed25519 agent key (raw, no prefix/location).
@@ -199,7 +190,6 @@ pub enum EntryTypes {
     Item(Item),
     Response(Response),
     Finding(Finding),
-    AdminX25519Key(AdminX25519Key),
     EncryptedAttachment(EncryptedAttachment),
 }
 
@@ -220,8 +210,6 @@ pub enum LinkTypes {
     AllAdmins,
     /// From a Finding's action hash to each EncryptedAttachment action hash.
     FindingToAttachment,
-    /// From the all-x25519-keys anchor to each AdminX25519Key action hash.
-    AllAdminX25519Keys,
 }
 
 // ── Anchors ───────────────────────────────────────────────────────────
@@ -249,14 +237,6 @@ pub fn all_admins_anchor() -> ExternResult<EntryHash> {
     hash_entry(&AdminGrant {
         admin_pubkey: AgentPubKey::from_raw_36(vec![0; 36]),
         progenitor_signature: Signature([0u8; 64]),
-        created_at: 0,
-    })
-}
-
-/// Deterministic anchor for AllAdminX25519Keys links (sentinel AdminX25519Key).
-pub fn all_x25519_keys_anchor() -> ExternResult<EntryHash> {
-    hash_entry(&AdminX25519Key {
-        x25519_pubkey: X25519PubKey::from([0u8; 32]),
         created_at: 0,
     })
 }
@@ -320,7 +300,6 @@ pub fn validate(op: Op) -> ExternResult<ValidateCallbackResult> {
                 }
                 Ok(ValidateCallbackResult::Valid)
             }
-            LinkTypes::AllAdminX25519Keys => Ok(ValidateCallbackResult::Valid),
         },
         FlatOp::RegisterDeleteLink { .. } => Ok(ValidateCallbackResult::Valid),
         _ => Ok(ValidateCallbackResult::Valid),
@@ -338,10 +317,9 @@ fn validate_entry(
         EntryTypes::Item(item) => validate_item(&item, author),
         EntryTypes::Response(_) => Ok(ValidateCallbackResult::Valid),
         EntryTypes::Finding(finding) => validate_finding(&finding),
-        // Companion encryption key and encrypted attachment: the cryptography
-        // is the access control, not validation. Any author may publish their
-        // own x25519 key and commit their own encrypted attachments.
-        EntryTypes::AdminX25519Key(_) => Ok(ValidateCallbackResult::Valid),
+        // Encrypted attachment: the cryptography is the access control, not
+        // validation. The attachment ciphertext is opaque to peers; the
+        // FindingToAttachment link binds it to its finding's author (above).
         EntryTypes::EncryptedAttachment(_) => Ok(ValidateCallbackResult::Valid),
     }
 }

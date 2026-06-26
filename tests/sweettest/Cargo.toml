@@ -27,13 +27,7 @@ rmp-serde = "1"
 holochain_serialized_bytes = "*"
 serde_yaml = "0.9"
 
-[[test]]
-name = "crypto_cohort"
-path = "tests/crypto_cohort.rs"
 
-[[test]]
-name = "attachment_loop"
-path = "tests/attachment_loop.rs"
 
 [[test]]
 name = "progenitor_gate"
