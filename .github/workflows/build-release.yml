@@ -78,7 +78,7 @@ jobs:
               'Pick your platform from the assets below:',
               '- **Linux** — `.deb`, `.rpm`, or `.AppImage`',
               '- **macOS** — `.dmg` (Intel or Apple Silicon)',
-              '- **Windows** — `.exe` installer or `.msi` (code-signed; verified publisher **FLOWSTA**)',
+              '- **Windows** — `.exe` installer or `.msi` (unsigned alpha; SmartScreen will warn on first launch)',
               '',
               "**Verify your download (optional):** `sha256sum -c SHA256SUMS.txt` (Linux) or `shasum -a 256 -c SHA256SUMS.txt` (macOS).",
             ].join('\n');

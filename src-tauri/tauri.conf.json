@@ -47,18 +47,7 @@
       "entitlements": "entitlements.plist",
       "hardenedRuntime": true
     },
-    "windows": {
-      "signCommand": {
-        "cmd": "pwsh",
-        "args": [
-          "-ExecutionPolicy",
-          "Bypass",
-          "-File",
-          "scripts/sign-windows.ps1",
-          "%1"
-        ]
-      }
-    }
+    "windows": {}
   },
   "plugins": {
     "shell": {
