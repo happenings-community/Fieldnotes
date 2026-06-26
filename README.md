@@ -61,6 +61,19 @@ This alpha is **not code-signed or notarised**, so macOS Gatekeeper will block i
 
 You only need to do this once. (Double-clicking the first time will *not* give you the Open option — you must right-click.) If macOS still refuses, clear the quarantine flag from a terminal: `xattr -dr com.apple.quarantine /Applications/Fieldnotes.app`. Signed builds are planned for a later release.
 
+### Windows — unsigned build
+
+This alpha is **not code-signed**, so Windows SmartScreen will warn on first launch that it's an unrecognised app. This is expected. To run it:
+
+1. When SmartScreen appears, click **More info**.
+2. Click **Run anyway**.
+
+You only need to do this once. Signed builds are planned for a later release.
+
+### Linux
+
+The `.deb`, `.rpm`, and `.AppImage` builds carry no signing prompt. For the AppImage, make it executable first (`chmod +x Fieldnotes_*.AppImage`) then run it.
+
 ### First run
 
 1. Open Fieldnotes. It starts its own Holochain conductor in the background (give it a moment on first launch).
@@ -103,7 +116,7 @@ The deeper infrastructure (conductor lifecycle, Flowsta integration, DNA migrati
 
 Fieldnotes is a fork of **[ProofPoll](https://github.com/WeAreFlowsta/ProofPoll)** by Flowsta — a verified-polling Holochain app, explicitly built to be forked. ProofPoll solved the genuinely hard parts of a desktop Holochain app (conductor lifecycle, Flowsta identity linking, DNA migration, encrypted private data on a public DHT) so that the next person doesn't have to. Fieldnotes is that fork: the polling substrate became a scenario-testing substrate.
 
-Flowsta's claim for ProofPoll is that you can build a real, useful Holochain application on top of it **without being a developer**. Fieldnotes is the evidence. It was built by a product owner who does not know any programming language — "usefully ignorant," comfortable at a terminal but not a coder — working with an AI assistant, across a couple of focused sittings (the git history bears this out).
+Flowsta's claim for ProofPoll is that you can build a real, useful Holochain application on top of it **without being a developer**. Fieldnotes is the evidence. It was built by a product owner who does not know any programming language — "usefully ignorant," comfortable at a terminal but not a coder — working with an AI assistant, across a handful of focused sittings — the initial build over a couple of days, then a later session that rebuilt the app around self-sovereign network creation, hardened and internally audited the security model, completed a full identity rename, and shipped this cross-platform release (the git history bears this out).
 
 The stronger evidence is what happened when it broke. An early build shipped with the administrator gate inert — built, but not actually enforcing. Rather than paper over it, the same non-developer-plus-AI pairing traced the fault down through five layers to its root cause (a raw-versus-serialized signature mismatch in the integrity zome), fixed it, and went further — rebuilding the app around self-sovereign network creation and proving the enforcement holds across separate agents with an automated test. Finding, fixing, and hardening a real cryptographic bug is a higher bar than getting lucky on the first try — and it was cleared without writing the code by hand.
 
