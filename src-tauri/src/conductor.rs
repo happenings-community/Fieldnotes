@@ -332,24 +332,6 @@ async fn wait_for_admin_ws(
     }
 }
 
-/// Full startup sequence: lair → conductor → install DNA → attach app interface.
-///
-/// ProofPoll uses lair's auto-generated key (no deterministic seed import).
-/// Result of the startup sequence, including migration status.
-pub struct StartupResult {
-    pub handle: ConductorHandle,
-    pub agent_key: String,
-    pub app_client: holochain_client::AppWebsocket,
-    /// v1.2 client for migration reads (v1.2 → v1.3).
-    pub app_client_v1_2: Option<holochain_client::AppWebsocket>,
-    /// v1.1 client for legacy reads.
-    pub app_client_v1_1: Option<holochain_client::AppWebsocket>,
-    /// v1.0 client for legacy reads.
-    pub app_client_v1_0: Option<holochain_client::AppWebsocket>,
-    pub lair_client: lair_keystore_api::prelude::LairClient,
-    pub needs_migration: bool,
-}
-
 /// Result of PHASE 1 of startup: conductor + lair running, admin WS ready, but
 /// NO app/DNA installed yet. The user chooses a network (create-your-own as
 /// progenitor, or join via invite) before phase 2 (install_network) runs.

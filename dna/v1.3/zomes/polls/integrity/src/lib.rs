@@ -138,11 +138,9 @@ pub struct Finding {
 
 // ── Entry type enum ───────────────────────────────────────────────────
 
-/// An administrator's published x25519 companion public key, used as the
-/// wrap target for cohort-encrypted attachments. The matching private key is
-/// held in lair (generated via create_x25519_keypair); only the public key is
-/// published here. Identity (who this admin is) is their agent/Vault key; this
-/// An administrator's published x25519 companion public key. DEAD CODE under
+/// One wrapped copy of an attachment's content key, for a single recipient.
+/// The image is encrypted once with a content key; that 32-byte key is then
+/// wrapped (via lair) to each recipient, producing one of these per recipient.
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 pub struct RecipientWrappedKey {
     /// The recipient's 32-byte Ed25519 agent key (raw, no prefix/location).

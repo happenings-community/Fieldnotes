@@ -127,11 +127,10 @@ export default component$(() => {
   // agent, PLAINTEXT on the DHT for v0.0.1 (cohort-visible). No "replace mine"
   // logic (unlike verdicts) and no tally — just the thread, newest last.
   //
-  // KNOWN LATER LAYERS (not this phase): cohort encryption of findings (the
-  // Model B evidence layer — private screenshots/logs encrypted to
-  // {admins + uploader}) and the secret-scan soft-redirect (regex for
-  // PEM/ghp_/AKIA/JWT → "attach as a private log instead"). Both come after the
-  // tool is usable; this phase is plaintext only.
+  // Cohort encryption of finding attachments (screenshots/logs encrypted to
+  // {admins + uploader}) is implemented — see create_encrypted_attachment /
+  // decrypt_attachment. Still a KNOWN LATER LAYER: the secret-scan soft-redirect
+  // (regex for PEM/ghp_/AKIA/JWT → "attach as a private log instead").
   const findings = useSignal<FindingData[]>([]);
   const findingInput = useSignal("");
   // Advisory live scan: flags likely private data as the tester types, so

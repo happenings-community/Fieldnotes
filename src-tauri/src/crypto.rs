@@ -116,24 +116,6 @@ pub async fn decrypt_as_recipient(
     Ok(plaintext.to_vec())
 }
 
-/// Sign arbitrary data with the agent's Ed25519 signing key.
-/// Returns the signature bytes.
-pub async fn sign_raw(
-    lair_client: &LairClient,
-    agent_ed25519_bytes: [u8; 32],
-    data: &[u8],
-) -> Result<Vec<u8>, String> {
-    let pub_key: Ed25519PubKey = BinDataSized(Arc::new(agent_ed25519_bytes));
-    let data_arc: Arc<[u8]> = data.into();
-
-    let signature = lair_client
-        .sign_by_pub_key(pub_key, None, data_arc)
-        .await
-        .map_err(|e| format!("Signing failed: {}", e))?;
-
-    Ok(signature.to_vec())
-}
-
 // ---------------------------------------------------------------------------
 // Host-side bulk AEAD (ring) — for payloads too large for lair's crypto_box.
 //

@@ -21,11 +21,6 @@
 //! Update the `invoke_handler` at the bottom to register your own Tauri commands.
 //! The startup sequence and migration wiring are reusable as-is.
 
-// Dead-code allowance: the fork carries old poll-model vestiges
-// (MigratedPollEntry/Vote/CreateItemInput/FlagPollInput duplicates,
-// EncryptedEntryData fields, HAPP_FILE_V1_0/1/2). Harmless; a proper
-// deletion sweep is deferred to post-alpha tidy-up.
-#![allow(dead_code)]
 
 mod commands;
 mod conductor;

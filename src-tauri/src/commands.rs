@@ -33,17 +33,6 @@ use std::sync::Mutex;
 // are required. The frontend never sees these directly — they're decoded
 // in the Tauri commands and returned as response types (below).
 
-/// Used to decode MigratedPoll entries when merging v1.0 and v1.1 poll lists.
-/// Mirrors the MigratedPoll entry type in the v1.1 integrity zome.
-#[derive(serde::Deserialize)]
-struct MigratedPollEntry {
-    old_action_hash: ActionHash,
-    #[allow(dead_code)]
-    new_action_hash: ActionHash,
-    #[allow(dead_code)]
-    migrated_at: i64,
-}
-
 /// Mirrors PollType in the v1.2 integrity zome.
 ///
 /// Must use the same serde representation so `decode_entry` works: rmp_serde
@@ -67,18 +56,6 @@ pub struct Poll {
     /// None for v1.0/v1.1 polls (no poll_type field — treated as Anonymous).
     #[serde(default)]
     pub poll_type: Option<PollType>,
-}
-
-#[derive(serde::Serialize, serde::Deserialize, Clone, Debug)]
-pub struct Vote {
-    pub poll_action_hash: ActionHash,
-    pub option_index: u32,
-    /// Only present on v1.2 public poll votes.
-    #[serde(default)]
-    pub display_name: Option<String>,
-    /// Only present on v1.2 public poll votes.
-    #[serde(default)]
-    pub profile_picture: Option<String>,
 }
 
 #[derive(serde::Serialize, serde::Deserialize, Debug)]
@@ -200,19 +177,6 @@ pub struct Finding {
     pub item_action_hash: ActionHash,
     pub text: String,
     pub created_at: i64,
-}
-
-/// Mirrors CreateItemInput in the coordinator zome (no created_at — the
-/// zome timestamps on create). Used for both create_item and import_items.
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-pub struct CreateItemInput {
-    pub kind: ItemKind,
-    pub campaign: String,
-    pub section: String,
-    pub title: String,
-    pub instructions: String,
-    pub look_for: String,
-    pub order: u32,
 }
 
 /// Mirrors RespondInput in the coordinator zome.
@@ -1357,12 +1321,6 @@ impl std::fmt::Display for FlagReason {
     }
 }
 
-#[derive(serde::Serialize, serde::Deserialize, Debug)]
-struct FlagPollInput {
-    poll_action_hash: ActionHash,
-    reason: String,
-}
-
 #[tauri::command]
 pub async fn flag_poll(
     state: tauri::State<'_, std::sync::Arc<AppState>>,
@@ -1505,8 +1463,6 @@ fn get_agent_ed25519_bytes(state: &AppState) -> Result<[u8; 32], String> {
 struct EncryptedEntryData {
     cipher: Vec<u8>,
     nonce: Vec<u8>,
-    entry_type_hint: String,
-    related_hash: Option<ActionHash>,
 }
 
 /// Draft poll as returned to the frontend (decrypted).

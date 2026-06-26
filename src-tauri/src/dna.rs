@@ -37,9 +37,6 @@ pub const APP_ID_V1_1: &str = "proofpoll_v1_1";
 pub const APP_ID_V1_2: &str = "proofpoll_v1_2";
 pub const APP_ID_V1_3: &str = "proofpoll_v1_3";
 
-const HAPP_FILE_V1_0: &str = "proofpoll_v1_0_happ.happ";
-const HAPP_FILE_V1_1: &str = "proofpoll_v1_1_happ.happ";
-const HAPP_FILE_V1_2: &str = "proofpoll_v1_2_happ.happ";
 const HAPP_FILE_V1_3: &str = "proofpoll_v1_3_happ.happ";
 
 /// The active version for all new reads and writes.
@@ -48,7 +45,10 @@ pub const ACTIVE_APP_ID: &str = APP_ID_V1_3;
 /// Result of the DNA installation phase.
 pub struct InstallResult {
     pub agent_pub_key: AgentPubKey,
-    /// True if v1.2 data exists and needs to be migrated to v1.3.
+    /// True if v1.2 data exists and needs to be migrated to v1.3. Computed by
+    /// the version detection for the planned v0.2 migration flow (issue #1);
+    /// the result is not consumed yet, hence the targeted allow.
+    #[allow(dead_code)]
     pub needs_migration: bool,
     /// True if v1.0 is installed and usable (for legacy reads).
     pub v1_0_available: bool,

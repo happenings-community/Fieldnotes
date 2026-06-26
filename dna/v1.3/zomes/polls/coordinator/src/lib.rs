@@ -486,7 +486,7 @@ pub fn store_encrypted_attachment(input: StoreAttachmentInput) -> ExternResult<A
 }
 
 /// Fetch all encrypted attachments for a finding (records; the host decrypts
-/// via crypto_open_encrypted using the caller's lair-held x25519 key).
+/// them via the lair-based attachment crypto in src-tauri/src/crypto.rs).
 #[hdk_extern]
 pub fn get_finding_attachments(finding_action_hash: ActionHash) -> ExternResult<Vec<Record>> {
     let links = get_links(
