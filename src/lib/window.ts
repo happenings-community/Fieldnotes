@@ -1,7 +1,7 @@
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 
 /**
- * Bring ProofPoll's own window back to the foreground after a cross-app flow
+ * Bring Fieldnotes's own window back to the foreground after a cross-app flow
  * (e.g. Flowsta sign-in, where the Vault popped up to ask for approval), so the
  * user lands back here and sees the result.
  *

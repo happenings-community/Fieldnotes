@@ -1,4 +1,4 @@
-//! ProofPoll Tauri application entry point.
+//! Fieldnotes Tauri application entry point.
 //!
 //! ## Module overview
 //!
@@ -55,14 +55,14 @@ pub fn run() {
                     .level(log::LevelFilter::Info)
                     .targets([
                         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::LogDir {
-                            file_name: Some("proofpoll".to_string()),
+                            file_name: Some("fieldnotes".to_string()),
                         }),
                         tauri_plugin_log::Target::new(tauri_plugin_log::TargetKind::Stdout),
                     ])
                     .build(),
             )?;
 
-            log::info!("ProofPoll starting up...");
+            log::info!("Fieldnotes starting up...");
             log::info!("Data dir: {:?}", data_dir);
 
             let app_state = Arc::new(AppState::new(data_dir));

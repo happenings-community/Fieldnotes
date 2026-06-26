@@ -1,5 +1,5 @@
 /**
- * Holochain zome call helpers for ProofPoll.
+ * Holochain zome call helpers for Fieldnotes.
  *
  * Thin wrappers around Tauri invoke() — all zome calls go through the Rust
  * backend. No @holochain/client in the frontend.
@@ -351,11 +351,11 @@ export async function getIdentityLink(): Promise<IdentityLinkData | null> {
  * recognise the user's own polls/votes/flags regardless of which device or
  * install authored them.
  *
- * Why a set, not a single key: ProofPoll generates a fresh conductor agent
+ * Why a set, not a single key: Fieldnotes generates a fresh conductor agent
  * key on every install. The user's stable identity is their Flowsta Vault
  * agent; each install links its local agent to that Vault agent via an
  * IsSamePerson attestation. `get_linked_agents(vaultAgent)` therefore returns
- * every ProofPoll agent the user has ever linked (this is a designed-in query
+ * every Fieldnotes agent the user has ever linked (this is a designed-in query
  * — the agent-linking zome indexes the link from the Vault agent's pubkey too).
  *
  * IMPORTANT: this is for RECOGNITION (read) only. Mutating an entry
@@ -371,7 +371,7 @@ export async function loadMyAgentSet(
 ): Promise<Set<string>> {
   try {
     // Single Rust round-trip: local agent ∪ agents linked to our Vault
-    // identity. The whole lookup (and its result) is logged to proofpoll.log
+    // identity. The whole lookup (and its result) is logged to fieldnotes.log
     // by the `get_my_agent_set` command, so recognition is verifiable.
     const agents = await invoke<string[]>("get_my_agent_set", { localAgent });
     return new Set(agents);

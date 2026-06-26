@@ -1,4 +1,4 @@
-//! Holochain conductor lifecycle management for ProofPoll.
+//! Holochain conductor lifecycle management for Fieldnotes.
 //!
 //! Starts lair-keystore and holochain as child processes, installs the DNA,
 //! and sets up WebSocket connections for zome calls.
@@ -32,13 +32,13 @@ pub const ADMIN_WS_PORT: u16 = 4466;
 // release; unset for fork developers, who get the public Holochain dev
 // bootstrap defaults). To override at build time:
 //
-//   PROOFPOLL_BOOTSTRAP_URL=https://your-bootstrap.example.com   \
-//   PROOFPOLL_SIGNAL_URL=wss://your-bootstrap.example.com        \
-//   PROOFPOLL_RELAY_URL=https://your-bootstrap.example.com./     \
-//   PROOFPOLL_AUTH_MATERIAL=<standard base64 of opaque auth bytes>     \
+//   FIELDNOTES_BOOTSTRAP_URL=https://your-bootstrap.example.com   \
+//   FIELDNOTES_SIGNAL_URL=wss://your-bootstrap.example.com        \
+//   FIELDNOTES_RELAY_URL=https://your-bootstrap.example.com./     \
+//   FIELDNOTES_AUTH_MATERIAL=<standard base64 of opaque auth bytes>     \
 //     cargo tauri build
 //
-// `PROOFPOLL_AUTH_MATERIAL` is optional and only set when targeting a
+// `FIELDNOTES_AUTH_MATERIAL` is optional and only set when targeting a
 // bootstrap that requires authentication (e.g. bootstrap.flowsta.com
 // when running with `--authentication-hook-server`). The same value
 // is written into both `base64_auth_material_bootstrap` and
@@ -56,7 +56,7 @@ pub const ADMIN_WS_PORT: u16 = 4466;
 // Rust, or `Buffer.from(s).toString('base64')` in Node.
 
 /// Default bootstrap URL — the Holochain ecosystem's public dev server.
-/// Override with `PROOFPOLL_BOOTSTRAP_URL` for production.
+/// Override with `FIELDNOTES_BOOTSTRAP_URL` for production.
 const DEFAULT_BOOTSTRAP_URL: &str = "https://dev-test-bootstrap2.holochain.org";
 
 /// Default signal URL — same host as the dev bootstrap.
@@ -64,11 +64,11 @@ const DEFAULT_SIGNAL_URL: &str = "wss://dev-test-bootstrap2.holochain.org";
 
 /// Default Iroh relay URL — the public Iroh-canary relay (matches
 /// Holochain's own NetworkConfig default). Override with
-/// `PROOFPOLL_RELAY_URL` for production.
+/// `FIELDNOTES_RELAY_URL` for production.
 const DEFAULT_RELAY_URL: &str = "https://use1-1.relay.n0.iroh-canary.iroh.link./";
 
 /// Treat empty-string env vars as unset — covers the common case of a
-/// fork's CI referencing `${{ secrets.PROOFPOLL_BOOTSTRAP_URL }}` when
+/// fork's CI referencing `${{ secrets.FIELDNOTES_BOOTSTRAP_URL }}` when
 /// the secret isn't configured (GitHub substitutes the empty string),
 /// which would otherwise clobber the default with empty.
 macro_rules! env_or {
@@ -81,19 +81,19 @@ macro_rules! env_or {
 }
 
 fn bootstrap_url() -> &'static str {
-    env_or!("PROOFPOLL_BOOTSTRAP_URL", DEFAULT_BOOTSTRAP_URL)
+    env_or!("FIELDNOTES_BOOTSTRAP_URL", DEFAULT_BOOTSTRAP_URL)
 }
 
 fn signal_url() -> &'static str {
-    env_or!("PROOFPOLL_SIGNAL_URL", DEFAULT_SIGNAL_URL)
+    env_or!("FIELDNOTES_SIGNAL_URL", DEFAULT_SIGNAL_URL)
 }
 
 fn relay_url() -> &'static str {
-    env_or!("PROOFPOLL_RELAY_URL", DEFAULT_RELAY_URL)
+    env_or!("FIELDNOTES_RELAY_URL", DEFAULT_RELAY_URL)
 }
 
 fn auth_material() -> Option<&'static str> {
-    match option_env!("PROOFPOLL_AUTH_MATERIAL") {
+    match option_env!("FIELDNOTES_AUTH_MATERIAL") {
         Some(s) if !s.is_empty() => Some(s),
         _ => None,
     }
@@ -144,7 +144,7 @@ pub enum ConductorStatus {
     Error { message: String },
 }
 
-/// Generate conductor-config.yaml for ProofPoll.
+/// Generate conductor-config.yaml for Fieldnotes.
 fn generate_conductor_config(
     conductor_dir: &Path,
     lair_connection_url: &str,
@@ -224,7 +224,7 @@ fn start_conductor_process(
     let stderr_file = std::fs::File::create(&stderr_path)
         .map_err(|e| format!("Failed to create conductor stderr log: {}", e))?;
 
-    let mut child = std::process::Command::new(sidecar_path("proofpoll-holochain"))
+    let mut child = std::process::Command::new(sidecar_path("fieldnotes-holochain"))
         .arg("-c")
         .arg(config_path)
         .arg("--piped")
@@ -561,7 +561,7 @@ async fn start_holochain_attempt(
 /// PHASE 2 of startup: install the chosen network's DNA and wire the app.
 ///
 /// Called from the install_network Tauri command AFTER the user chooses a
-/// network. Installs the proofpoll DNA with the given network_seed +
+/// network. Installs the fieldnotes DNA with the given network_seed +
 /// progenitor_pubkey as modifiers, attaches the app interface, populates
 /// AppState (agent key, app clients, the handle's app_port), and emits Ready.
 ///

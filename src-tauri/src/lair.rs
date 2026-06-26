@@ -64,7 +64,7 @@ pub fn start_lair_process(
         // Piped handles that nothing ever drains are functionally /dev/null.
         let init_stdout = open_log_file(lair_dir, "lair-init-stdout.log")?;
         let init_stderr = open_log_file(lair_dir, "lair-init-stderr.log")?;
-        let mut child = Command::new(sidecar_path("proofpoll-lair-keystore"))
+        let mut child = Command::new(sidecar_path("fieldnotes-lair-keystore"))
             .arg("init")
             .arg("--piped")
             .current_dir(lair_dir)
@@ -114,7 +114,7 @@ pub fn start_lair_process(
     log::info!("Starting lair-keystore server...");
     let server_stdout = open_log_file(lair_dir, "lair-server-stdout.log")?;
     let server_stderr = open_log_file(lair_dir, "lair-server-stderr.log")?;
-    let mut child = Command::new(sidecar_path("proofpoll-lair-keystore"))
+    let mut child = Command::new(sidecar_path("fieldnotes-lair-keystore"))
         .arg("server")
         .arg("--piped")
         .current_dir(lair_dir)

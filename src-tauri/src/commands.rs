@@ -1,4 +1,4 @@
-//! Tauri commands for ProofPoll.
+//! Tauri commands for Fieldnotes.
 //!
 //! This is the bridge between the Qwik frontend and the Holochain conductor.
 //! All zome calls go through the Rust backend via AppWebsocket — the frontend
@@ -377,7 +377,7 @@ fn generate_passphrase() -> String {
 // Change POLLS_ZOME to match your coordinator zome name.
 
 /// Must match the role `id` in your happ.yaml.
-const ROLE_NAME: &str = "proofpoll";
+const ROLE_NAME: &str = "fieldnotes";
 /// Your app's coordinator zome name (from dna.yaml).
 const POLLS_ZOME: &str = "polls";
 /// Flowsta agent-linking zome — keep as-is for identity integration.
@@ -457,7 +457,7 @@ async fn try_reenable_app() -> Result<(), String> {
 
     let admin_ws = AdminWebsocket::connect(
         format!("localhost:{}", crate::conductor::ADMIN_WS_PORT),
-        Some("proofpoll".to_string()),
+        Some("fieldnotes".to_string()),
     )
     .await
     .map_err(|e| format!("Failed to connect to admin WS for recovery: {}", e))?;
@@ -1128,7 +1128,7 @@ pub async fn revoke_identity_link(
     // Best-effort: notify Vault via IPC
     let agent_key = state.agent_pub_key.lock().unwrap().clone();
     if let Some(agent_key) = agent_key {
-        let _ = notify_vault_revoke("ProofPoll", &agent_key).await;
+        let _ = notify_vault_revoke("Fieldnotes", &agent_key).await;
     }
 
     Ok(())
@@ -1201,7 +1201,7 @@ pub async fn get_linked_agents(
 static LAST_AGENT_SET: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex::new(None);
 
 /// Every Holochain agent key that belongs to THIS user: the local conductor
-/// agent plus every other ProofPoll agent linked to the same Flowsta Vault
+/// agent plus every other Fieldnotes agent linked to the same Flowsta Vault
 /// identity (i.e. the user's other installs/devices). Used for RECOGNITION
 /// only — "is this poll/vote/flag mine?" — never for mutation (Holochain only
 /// lets the original author edit/delete, so those gates stay bound to the
@@ -1210,7 +1210,7 @@ static LAST_AGENT_SET: std::sync::Mutex<Option<Vec<String>>> = std::sync::Mutex:
 /// This lives in Rust rather than being orchestrated from the webview so the
 /// lookup is (a) a single robust round-trip instead of a fragile multi-call
 /// frontend sequence that a poll-fetch failure could skip, and (b) fully
-/// observable in proofpoll.log (webview console logs aren't readable on disk).
+/// observable in fieldnotes.log (webview console logs aren't readable on disk).
 ///
 /// Resolved as a 2-hop walk through the link graph: local agent → the Vault
 /// identity hub(s) it's linked to → every agent linked to that hub. We get the
@@ -1760,7 +1760,7 @@ fn parse_action_hash(s: &str) -> Result<ActionHash, String> {
 // data export — what the Cryptographic Autonomy License (§4.2.1) obliges
 // every Holochain app to provide.
 //
-// Adding a new entry type to ProofPoll means adding ONE `match` arm in
+// Adding a new entry type to Fieldnotes means adding ONE `match` arm in
 // `decode_record_for_export` and one in `build_canonical_backup`'s record loop,
 // mirroring the entry type's existing structs. There is no restore command —
 // see the note below on why recovery is recognition, not replay.
@@ -1848,7 +1848,7 @@ pub async fn build_canonical_backup(
     // 1. Connect to the admin websocket (same pattern as try_reenable_app).
     let admin_ws = AdminWebsocket::connect(
         format!("localhost:{}", crate::conductor::ADMIN_WS_PORT),
-        Some("proofpoll".to_string()),
+        Some("fieldnotes".to_string()),
     )
     .await
     .map_err(|e| format!("Failed to connect to admin WS for backup: {}", e))?;
@@ -1920,7 +1920,7 @@ pub async fn build_canonical_backup(
         "_readme": "Your Fieldnotes data, backed up automatically by Flowsta Vault. Encrypted with your device key — only you can read it. Each record below carries a plain-English view of what you authored AND a signed Holochain record for restore. The lair_* fields are the cryptographic keys that let you recover this identity on a fresh install.",
         "license": "Cryptographic Autonomy License v1.0 (CAL-1.0)",
         "app": {
-            "name": "ProofPoll",
+            "name": "Fieldnotes",
         },
         "agent_pub_key": my_key,
         "exported_at_iso": format!("unix:{}",
@@ -1970,7 +1970,7 @@ pub async fn build_canonical_backup(
 /// `EntryTypes` enum order. Update it alongside your entry types — it is the
 /// one place that maps on-chain entry indices back to readable names.
 ///
-/// ProofPoll v1.3 (`dna/v1.3/workdir/dna.yaml`):
+/// Fieldnotes v1.3 (`dna/v1.3/workdir/dna.yaml`):
 ///   integrity zomes: [0] agent_linking_integrity, [1] polls_integrity
 ///   polls_integrity EntryTypes: [0] Item [1] Response [2] Finding
 fn classify_dump_record(
@@ -2498,7 +2498,7 @@ pub async fn get_network_info() -> Result<NetworkInfo, String> {
 
     let admin_ws = AdminWebsocket::connect(
         format!("localhost:{}", crate::conductor::ADMIN_WS_PORT),
-        Some("proofpoll".to_string()),
+        Some("fieldnotes".to_string()),
     )
     .await
     .map_err(|e| format!("Admin WS connect failed: {e}"))?;

@@ -1,6 +1,6 @@
 ---
 manifest_version: "0"
-name: proofpoll_v1_3
+name: fieldnotes_v1_3
 integrity:
   network_seed: "fieldnotes-network-v1"
   properties:

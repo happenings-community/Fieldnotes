@@ -137,7 +137,7 @@ export default component$(() => {
       try {
         const { linkFlowstaIdentity } = await import("@flowsta/holochain");
         const result = await linkFlowstaIdentity({
-          appName: "ProofPoll",
+          appName: "Fieldnotes",
           clientId: import.meta.env.VITE_FLOWSTA_CLIENT_ID,
           localAgentPubKey: agentKey.value,
         });
@@ -195,7 +195,7 @@ export default component$(() => {
       const { linkFlowstaIdentity } = await import("@flowsta/holochain");
 
       const result = await linkFlowstaIdentity({
-        appName: "ProofPoll",
+        appName: "Fieldnotes",
         clientId: import.meta.env.VITE_FLOWSTA_CLIENT_ID,
         localAgentPubKey: agentKey.value,
       });

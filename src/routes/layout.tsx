@@ -87,11 +87,11 @@ export default component$(() => {
         // exports — see backup.rs::is_canonical_backup over in flowsta-vault.
         stopAutoBackup = startAutoBackup({
           clientId: import.meta.env.VITE_FLOWSTA_CLIENT_ID,
-          appName: "ProofPoll",
+          appName: "Fieldnotes",
           intervalMinutes: 60,
           getData: () => invoke("build_canonical_backup"),
-          onSuccess: (r) => console.log(`[ProofPoll] Vault backup: ${r.dataSize} bytes`),
-          onError: (e) => console.warn("[ProofPoll] Vault backup skipped:", e.message),
+          onSuccess: (r) => console.log(`[Fieldnotes] Vault backup: ${r.dataSize} bytes`),
+          onError: (e) => console.warn("[Fieldnotes] Vault backup skipped:", e.message),
         });
       } catch {
         // SDK import failed — ignore
@@ -160,7 +160,7 @@ export default component$(() => {
                       .then(async ({ linkFlowstaIdentity }) => {
                         try {
                           const result = await linkFlowstaIdentity({
-                            appName: "ProofPoll",
+                            appName: "Fieldnotes",
                             clientId: import.meta.env.VITE_FLOWSTA_CLIENT_ID,
                             localAgentPubKey: agentPubKey,
                           });
@@ -169,7 +169,7 @@ export default component$(() => {
                               result.payload.vaultAgentPubKey,
                               result.payload.vaultSignature,
                             );
-                            console.log("[ProofPoll] DHT identity link re-created after migration");
+                            console.log("[Fieldnotes] DHT identity link re-created after migration");
                           }
                         } catch {
                           // Vault dialog dismissed — link still works locally
@@ -348,7 +348,7 @@ export default component$(() => {
    * permanent and they want to clean up. Revokes the DHT entry, clears the
    * profile cache, and drops to `unlinked` so the layout shows the standard
    * sign-in CTA again. Does NOT delete past polls/votes — those remain
-   * attributable to ProofPoll's local agent.
+   * attributable to Fieldnotes's local agent.
    */
   const handleDisconnect = $(async () => {
     if (disconnecting.value) return;

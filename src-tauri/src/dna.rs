@@ -1,4 +1,4 @@
-//! DNA installation and app client setup for ProofPoll.
+//! DNA installation and app client setup for Fieldnotes.
 //!
 //! Supports multiple DNA versions for migration. The "active" version is v1.1;
 //! v1.0 is kept installed (read-only) when migrating existing data.
@@ -10,7 +10,7 @@
 //!   - `setup_app_interface()` — Creates WebSocket connections for zome calls
 //!
 //! Change the version constants at the top to match your app/hApp names.
-//! The `"proofpoll"` string passed to `AdminWebsocket::connect()` and
+//! The `"fieldnotes"` string passed to `AdminWebsocket::connect()` and
 //! `AppWebsocket::connect()` is an origin identifier — change it to your app name.
 //! The installation and WebSocket logic is otherwise app-agnostic.
 
@@ -35,9 +35,9 @@ use std::path::Path;
 pub const APP_ID_V1_0: &str = "proofpoll_v1_0";
 pub const APP_ID_V1_1: &str = "proofpoll_v1_1";
 pub const APP_ID_V1_2: &str = "proofpoll_v1_2";
-pub const APP_ID_V1_3: &str = "proofpoll_v1_3";
+pub const APP_ID_V1_3: &str = "fieldnotes_v1_3";
 
-const HAPP_FILE_V1_3: &str = "proofpoll_v1_3_happ.happ";
+const HAPP_FILE_V1_3: &str = "fieldnotes_v1_3_happ.happ";
 
 /// The active version for all new reads and writes.
 pub const ACTIVE_APP_ID: &str = APP_ID_V1_3;
@@ -58,7 +58,7 @@ pub struct InstallResult {
     pub v1_2_available: bool,
 }
 
-/// Install ProofPoll DNAs, handling upgrades across all versions.
+/// Install Fieldnotes DNAs, handling upgrades across all versions.
 ///
 /// - Fresh install: installs v1.3 only.
 /// - Upgrade from v1.2: installs v1.3 alongside v1.2, flags migration needed.
@@ -71,7 +71,7 @@ pub async fn install_dnas(
 ) -> Result<InstallResult, String> {
     let admin_ws = AdminWebsocket::connect(
         format!("localhost:{}", admin_port),
-        Some("proofpoll".to_string()),
+        Some("fieldnotes".to_string()),
     )
     .await
     .map_err(|e| format!("Failed to connect to admin WebSocket: {}", e))?;
@@ -180,14 +180,14 @@ pub async fn install_dnas(
         let happ_path = resource_dir.join(HAPP_FILE_V1_3);
         if !happ_path.exists() {
             return Err(format!(
-                "ProofPoll v1.3 hApp bundle not found at {:?}",
+                "Fieldnotes v1.3 hApp bundle not found at {:?}",
                 happ_path
             ));
         }
 
-        log::info!("Installing ProofPoll v1.3 DNA from {:?}...", happ_path);
+        log::info!("Installing Fieldnotes v1.3 DNA from {:?}...", happ_path);
         // Path C: inject the user-chosen network seed + progenitor pubkey as DNA
-        // modifiers for the `proofpoll` role. This yields a DNA hash unique to
+        // modifiers for the `fieldnotes` role. This yields a DNA hash unique to
         // this (seed, progenitor) pair — a self-sovereign network the running
         // user can be progenitor of (create-your-own) or join (via invite).
         let progenitor_props = YamlProperties::new(serde_yaml::Value::Mapping({
@@ -200,7 +200,7 @@ pub async fn install_dnas(
         }));
         let mut roles_settings: HashMap<String, RoleSettings> = HashMap::new();
         roles_settings.insert(
-            "proofpoll".to_string(),
+            "fieldnotes".to_string(),
             RoleSettings::Provisioned {
                 membrane_proof: None,
                 modifiers: Some(DnaModifiersOpt {
@@ -230,7 +230,7 @@ pub async fn install_dnas(
             .map_err(|e| format!("Failed to enable v1.3 DNA: {}", e))?;
 
         v1_3_agent_key = Some(app_info.agent_pub_key);
-        log::info!("ProofPoll v1.3 DNA installed and enabled");
+        log::info!("Fieldnotes v1.3 DNA installed and enabled");
     }
 
     // Force re-enable v1.3 to recover any disabled cells from previous runs
@@ -249,7 +249,7 @@ pub async fn install_dnas(
         .any(|app| app.installed_app_id == APP_ID_V1_3);
 
     if !v1_3_enabled {
-        return Err("ProofPoll v1.3 DNA installation verification failed".to_string());
+        return Err("Fieldnotes v1.3 DNA installation verification failed".to_string());
     }
 
     let agent_pub_key = v1_3_agent_key.ok_or("No agent key after installation")?;
@@ -278,7 +278,7 @@ pub async fn setup_app_interface(
 ) -> Result<(u16, AppWebsocket, Option<AppWebsocket>, Option<AppWebsocket>, Option<AppWebsocket>), String> {
     let admin_ws = AdminWebsocket::connect(
         format!("localhost:{}", admin_port),
-        Some("proofpoll".to_string()),
+        Some("fieldnotes".to_string()),
     )
     .await
     .map_err(|e| format!("Failed to connect to admin WebSocket: {}", e))?;
@@ -397,7 +397,7 @@ pub async fn setup_app_interface(
         format!("localhost:{}", app_port),
         token_v1_3.token,
         signer_arc.clone(),
-        Some("proofpoll".to_string()),
+        Some("fieldnotes".to_string()),
     )
     .await
     .map_err(|e| format!("Failed to connect v1.3 app WebSocket: {}", e))?;
@@ -419,7 +419,7 @@ pub async fn setup_app_interface(
                     format!("localhost:{}", app_port),
                     token_v1_2.token,
                     signer_arc.clone(),
-                    Some("proofpoll".to_string()),
+                    Some("fieldnotes".to_string()),
                 )
                 .await
                 {
@@ -457,7 +457,7 @@ pub async fn setup_app_interface(
                     format!("localhost:{}", app_port),
                     token_v1_1.token,
                     signer_arc.clone(),
-                    Some("proofpoll".to_string()),
+                    Some("fieldnotes".to_string()),
                 )
                 .await
                 {
@@ -495,7 +495,7 @@ pub async fn setup_app_interface(
                     format!("localhost:{}", app_port),
                     token_v1_0.token,
                     signer_arc,
-                    Some("proofpoll".to_string()),
+                    Some("fieldnotes".to_string()),
                 )
                 .await
                 {

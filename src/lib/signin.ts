@@ -7,8 +7,8 @@
 // Callers set the intent then nav("/identity/"); the identity page reads
 // + clears the intent in its useVisibleTask$.
 
-const AUTO_LINK_KEY = "proofpoll.signin.autoLink";
-const RETURN_TO_KEY = "proofpoll.signin.returnTo";
+const AUTO_LINK_KEY = "fieldnotes.signin.autoLink";
+const RETURN_TO_KEY = "fieldnotes.signin.returnTo";
 
 export interface SignInIntent {
   autoLink: boolean;
