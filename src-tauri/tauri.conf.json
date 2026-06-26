@@ -43,9 +43,7 @@
       "icons/icon.ico"
     ],
     "macOS": {
-      "signingIdentity": null,
-      "entitlements": "entitlements.plist",
-      "hardenedRuntime": true
+      "signingIdentity": null
     },
     "windows": {}
   },

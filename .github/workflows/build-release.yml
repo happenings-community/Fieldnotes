@@ -286,10 +286,10 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Default the signing identity to '-' (ad-hoc) when not on
-          # macOS or when the secret isn't configured. tauri-action's
-          # macOS sign step errors otherwise.
-          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_SIGNING_IDENTITY || '-' }}
+          # Empty signing identity when the secret isn't configured, so
+          # tauri-action skips codesigning entirely and produces an unsigned
+          # bundle (alpha). A real identity here would enable signing.
+          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_SIGNING_IDENTITY || '' }}
         with:
           releaseId: ${{ needs.create-release.outputs.release_id }}
           args: --target ${{ matrix.target }}${{ steps.tauri_args.outputs.extra }}
