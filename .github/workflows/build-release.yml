@@ -7,7 +7,7 @@ name: Build Release
 #
 # ## Bootstrap configuration (production releases)
 #
-# The "official" ProofPoll binary built by this workflow uses
+# The "official" Fieldnotes binary built by this workflow uses
 # bootstrap.flowsta.com. The conductor's bootstrap/signal/relay URLs +
 # optional bootstrap auth material are baked in via the compile-time env
 # vars below, populated from GitHub Actions secrets.
@@ -19,10 +19,10 @@ name: Build Release
 # bootstrap. No Flowsta dependency.
 #
 # To target your own bootstrap (or Flowsta's), set in your repo settings:
-#   PROOFPOLL_BOOTSTRAP_URL   e.g. https://bootstrap.flowsta.com
-#   PROOFPOLL_SIGNAL_URL      e.g. wss://bootstrap.flowsta.com
-#   PROOFPOLL_RELAY_URL       e.g. https://bootstrap.flowsta.com./
-#   PROOFPOLL_AUTH_MATERIAL   base64url of opaque auth bytes (only if your
+#   FIELDNOTES_BOOTSTRAP_URL   e.g. https://bootstrap.flowsta.com
+#   FIELDNOTES_SIGNAL_URL      e.g. wss://bootstrap.flowsta.com
+#   FIELDNOTES_RELAY_URL       e.g. https://bootstrap.flowsta.com./
+#   FIELDNOTES_AUTH_MATERIAL   base64url of opaque auth bytes (only if your
 #                             bootstrap requires --authentication-hook-server)
 #   VITE_FLOWSTA_CLIENT_ID    your dev.flowsta.com client_id (only if you
 #                             want Flowsta OAuth wired in)
@@ -60,15 +60,15 @@ jobs:
             const body = [
               `## Fieldnotes v${version}`,
               '',
-              "**Verified polls that can't be faked, censored, or quietly rewritten — running on your own machine, owned by the people who use them.**",
+              "**A Holochain desktop app for structured scenario testing: run a shared script of test scenarios, record what you find, and have every finding live on a peer-to-peer network owned by the people doing the testing.**",
               '',
-              'ProofPoll is a free, open-source desktop app for polls and votes where the results actually mean something:',
+              'Fieldnotes is a free, open-source desktop app for structured scenario testing:',
               '',
-              '- **One vote, one real person.** Voters link a verified [Flowsta](https://flowsta.com) identity, so every vote resolves to a single human — even across multiple devices — and duplicates are dropped.',
-              "- **No one can rewrite or delete it.** Polls and votes live on a peer-to-peer Holochain network, replicated and validated across everyone who runs the app. There's no admin who can change a result or take a poll down — not even us.",
-              '- **Private data on a public network.** Attach a private rationale to a vote, or draft a poll before publishing — ProofPoll encrypts it on your machine before it ever leaves.',
+              "- **Shared scenario boards.** A campaign of test scenarios that every tester sees, with per-tester verdicts (Pass / Fail / Partial / Skip) and an append-only thread of findings, so nothing is silently overwritten.",
+              "- **Owned by the testers.** Scenarios, verdicts, and findings live on a peer-to-peer Holochain network replicated across everyone running the app. There is no central server holding the results.",
+              '- **Encrypted attachments.** Attach a screenshot or log to your finding, encrypted so only the administrator cohort can read it; peers store the ciphertext but cannot read it.',
               '',
-              'Built on **[Flowsta Vault](https://flowsta.com/vault/)** (your identity and keys stay on your own machine), and a complete, fork-ready template for any desktop Holochain app — see the [forking guide](https://github.com/WeAreFlowsta/ProofPoll#forking-guide).',
+              'Built on **[Flowsta Vault](https://flowsta.com/vault/)** (your identity and keys stay on your own machine). Every tester links a verified identity, so contributions resolve to a real person across devices, and a one-click export hands you a complete portable copy of everything you have authored.',
               '',
               "### What's new in this release",
               '<!-- Edit this section with the highlights for this release: new features, fixes, security/integrity changes. -->',
@@ -116,16 +116,16 @@ jobs:
     # can check for them (step-level env is evaluated AFTER the if, so
     # secrets only set there can't gate the step itself).
     #
-    # The PROOFPOLL_* vars are consumed by src-tauri/src/conductor.rs at
+    # The FIELDNOTES_* vars are consumed by src-tauri/src/conductor.rs at
     # compile time — empty values fall back to the source defaults
     # (public Holochain dev bootstrap, no auth). The APPLE_* and
     # ESIGNER_* vars are checked by the signing steps below; forks
     # without those secrets get unsigned bundles, no signing-step failures.
     env:
-      PROOFPOLL_BOOTSTRAP_URL: ${{ secrets.PROOFPOLL_BOOTSTRAP_URL }}
-      PROOFPOLL_SIGNAL_URL: ${{ secrets.PROOFPOLL_SIGNAL_URL }}
-      PROOFPOLL_RELAY_URL: ${{ secrets.PROOFPOLL_RELAY_URL }}
-      PROOFPOLL_AUTH_MATERIAL: ${{ secrets.PROOFPOLL_AUTH_MATERIAL }}
+      FIELDNOTES_BOOTSTRAP_URL: ${{ secrets.FIELDNOTES_BOOTSTRAP_URL }}
+      FIELDNOTES_SIGNAL_URL: ${{ secrets.FIELDNOTES_SIGNAL_URL }}
+      FIELDNOTES_RELAY_URL: ${{ secrets.FIELDNOTES_RELAY_URL }}
+      FIELDNOTES_AUTH_MATERIAL: ${{ secrets.FIELDNOTES_AUTH_MATERIAL }}
       VITE_FLOWSTA_CLIENT_ID: ${{ secrets.VITE_FLOWSTA_CLIENT_ID }}
       APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
       APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -325,7 +325,7 @@ jobs:
             });
 
             // Tauri's auto-update tarballs ship without the version in
-            // their filename ("ProofPoll_aarch64.app.tar.gz"); inject it
+            // their filename ("Fieldnotes_aarch64.app.tar.gz"); inject it
             // in the rename so they end up consistent with the .dmg
             // naming.
             const version = context.ref.replace('refs/tags/fieldnotes-v', '');

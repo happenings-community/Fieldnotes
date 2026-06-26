@@ -108,8 +108,8 @@ impl CommandExt for Command {
 #[cfg(target_os = "windows")]
 mod win_job {
     //! Kill-on-close Job Object: the Windows stand-in for Linux's
-    //! `PR_SET_PDEATHSIG`. Every sidecar (`proofpoll-holochain`,
-    //! `proofpoll-lair-keystore`) is assigned to one process-wide job that has
+    //! `PR_SET_PDEATHSIG`. Every sidecar (`fieldnotes-holochain`,
+    //! `fieldnotes-lair-keystore`) is assigned to one process-wide job that has
     //! `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`. The app process owns the only
     //! handle to that job, so when it exits — gracefully, by crash, or by
     //! Task Manager — Windows closes the handle and terminates every process
@@ -394,7 +394,7 @@ mod windows_hide {
     /// `CASCADIA_HOSTING_WINDOW_CLASS` window whose title is the full path to
     /// the sidecar binary — so the title (not the owning process) is how we
     /// find them. The classic `conhost` window titles the same way.
-    const SIDECAR_TITLE_MARKERS: &[&str] = &["proofpoll-holochain", "proofpoll-lair-keystore"];
+    const SIDECAR_TITLE_MARKERS: &[&str] = &["fieldnotes-holochain", "fieldnotes-lair-keystore"];
 
     /// Hide every console-host window whose title names one of our sidecars,
     /// regardless of which process owns it (it's usually `WindowsTerminal.exe`,

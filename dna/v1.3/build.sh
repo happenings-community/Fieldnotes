@@ -81,11 +81,11 @@ hc app pack workdir
 RESOURCES_DIR="$SCRIPT_DIR/../../src-tauri/resources"
 if [ -d "$RESOURCES_DIR" ] || [ -d "$SCRIPT_DIR/../../src-tauri" ]; then
     mkdir -p "$RESOURCES_DIR"
-    cp workdir/proofpoll_v1_3_happ.happ "$RESOURCES_DIR/"
+    cp workdir/fieldnotes_v1_3_happ.happ "$RESOURCES_DIR/"
     echo "Copied hApp to src-tauri/resources/"
 fi
 
 echo ""
 echo "Build complete!"
-echo "  - DNA:  workdir/proofpoll_v1_3.dna"
-echo "  - hApp: workdir/proofpoll_v1_3_happ.happ"
+echo "  - DNA:  workdir/fieldnotes_v1_3.dna"
+echo "  - hApp: workdir/fieldnotes_v1_3_happ.happ"

@@ -1,4 +1,4 @@
-//! DNA migration orchestration for ProofPoll.
+//! DNA migration orchestration for Fieldnotes.
 //!
 //! Migrates user-authored data from the previous DNA version to the current one:
 //!   1. Export user-authored polls and votes from the source DHT
@@ -27,7 +27,7 @@ use std::sync::Arc;
 use tauri::Emitter;
 
 /// Role name for zome calls — must match happ.yaml role id.
-const ROLE_NAME: &str = "proofpoll";
+const ROLE_NAME: &str = "fieldnotes";
 
 // ── Migration state (persisted to disk) ───────────────────────────────
 

@@ -1,13 +1,13 @@
 //! Resolve the on-disk path of a bundled Tauri sidecar binary.
 //!
-//! Sidecars are prefixed with `proofpoll-` so they don't collide with
+//! Sidecars are prefixed with `fieldnotes-` so they don't collide with
 //! identically-named binaries shipped by other Tauri/Holochain apps.
 //! See <https://v2.tauri.app/develop/sidecar/>.
 
 use std::path::PathBuf;
 
 /// Resolve the path of a sidecar binary by its declared name in
-/// `tauri.conf.json` (e.g. `"proofpoll-lair-keystore"`).
+/// `tauri.conf.json` (e.g. `"fieldnotes-lair-keystore"`).
 ///
 /// - **Dev (`cargo tauri dev`)**: looks for `<manifest>/binaries/<name>-<triple>`.
 ///   This mirrors how Tauri resolves externalBin in dev mode but uses a

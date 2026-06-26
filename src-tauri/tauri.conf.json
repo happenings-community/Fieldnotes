@@ -34,7 +34,7 @@
       "binaries/fieldnotes-lair-keystore"
     ],
     "resources": [
-      "resources/proofpoll_v1_3_happ.happ"
+      "resources/fieldnotes_v1_3_happ.happ"
     ],
     "icon": [
       "icons/32x32.png",
