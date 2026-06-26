@@ -1294,6 +1294,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "fieldnotes"
+version = "0.1.2"
+dependencies = [
+ "base64 0.22.1",
+ "hex",
+ "holochain_client",
+ "holochain_integrity_types",
+ "holochain_state_types",
+ "holochain_types",
+ "lair_keystore_api",
+ "libc",
+ "log",
+ "os_info",
+ "percent-encoding",
+ "rand 0.8.5",
+ "reqwest 0.12.28",
+ "ring",
+ "rmp-serde",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-log",
+ "tauri-plugin-shell",
+ "thiserror 1.0.69",
+ "tokio",
+ "windows-sys 0.59.0",
+]
+
+[[package]]
 name = "filetime"
 version = "0.2.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4033,37 +4064,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8fd00f0bb2e90d81d1044c2b32617f68fcb9fa3bb7640c23e9c748e53fb30934"
 dependencies = [
  "unicode-ident",
-]
-
-[[package]]
-name = "proofpoll"
-version = "0.2.1"
-dependencies = [
- "base64 0.22.1",
- "hex",
- "holochain_client",
- "holochain_integrity_types",
- "holochain_state_types",
- "holochain_types",
- "lair_keystore_api",
- "libc",
- "log",
- "os_info",
- "percent-encoding",
- "rand 0.8.5",
- "reqwest 0.12.28",
- "ring",
- "rmp-serde",
- "serde",
- "serde_json",
- "serde_yaml",
- "tauri",
- "tauri-build",
- "tauri-plugin-log",
- "tauri-plugin-shell",
- "thiserror 1.0.69",
- "tokio",
- "windows-sys 0.59.0",
 ]
 
 [[package]]
