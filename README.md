@@ -120,7 +120,7 @@ Flowsta's claim for ProofPoll is that you can build a real, useful Holochain app
 
 The stronger evidence is what happened when it broke. An early build shipped with the administrator gate inert — built, but not actually enforcing. Rather than paper over it, the same non-developer-plus-AI pairing traced the fault down through five layers to its root cause (a raw-versus-serialized signature mismatch in the integrity zome), fixed it, and went further — rebuilding the app around self-sovereign network creation and proving the enforcement holds across separate agents with an automated test. Finding, fixing, and hardening a real cryptographic bug is a higher bar than getting lucky on the first try — and it was cleared without writing the code by hand.
 
-The headline is not *who* built it. It is *who can*. If someone who can't write code can produce a usable peer-to-peer application on this foundation, the barrier everyone assumed stood between an idea and a shipped hApp is lower than it looks. A companion guide — *building on ProofPoll as a non-developer* — is planned to turn this proof into a path others can follow.
+The headline is not *who* built it. It is *who can*. If someone who can't write code can produce a usable peer-to-peer application on this foundation, the barrier everyone assumed stood between an idea and a shipped hApp is lower than it looks. A companion guide — *building on ProofPoll as a non-developer* — is here: **[Companion Guide](https://github.com/happenings-community/Fieldnotes/blob/main/BUILDING.md)**
 
 ---
 
