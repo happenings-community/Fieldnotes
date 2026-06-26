@@ -1,165 +1,50 @@
+# Builds unsigned alpha installers for Linux, macOS (Intel + Apple Silicon),
+# and Windows on each push of a fieldnotes-v* tag. No code signing: a fork
+# without Apple Developer / Windows code-signing accounts ships unsigned
+# bundles (the OS shows an unsigned-app warning on first launch; see README).
+# tauri-action creates the GitHub release draft and uploads the artifacts.
 name: Build Release
-
-# Tag-driven release. Push a `fieldnotes-v<version>` tag to build + publish
-# installers for Linux, macOS (Intel + Apple Silicon), and Windows. Tags
-# with a hyphen suffix (e.g. fieldnotes-v1.4.0-beta1) are published as
-# pre-releases.
-#
-# ## Bootstrap configuration (production releases)
-#
-# The "official" Fieldnotes binary built by this workflow uses
-# bootstrap.flowsta.com. The conductor's bootstrap/signal/relay URLs +
-# optional bootstrap auth material are baked in via the compile-time env
-# vars below, populated from GitHub Actions secrets.
-#
-# **Fork-friendly:** if a fork copies this workflow without setting the
-# secrets, GitHub passes empty strings, and `conductor.rs` falls back to
-# the public Holochain dev bootstrap defaults (see env_or! macro). The
-# fork's release just works against the Holochain ecosystem's free
-# bootstrap. No Flowsta dependency.
-#
-# To target your own bootstrap (or Flowsta's), set in your repo settings:
-#   FIELDNOTES_BOOTSTRAP_URL   e.g. https://bootstrap.flowsta.com
-#   FIELDNOTES_SIGNAL_URL      e.g. wss://bootstrap.flowsta.com
-#   FIELDNOTES_RELAY_URL       e.g. https://bootstrap.flowsta.com./
-#   FIELDNOTES_AUTH_MATERIAL   base64url of opaque auth bytes (only if your
-#                             bootstrap requires --authentication-hook-server)
-#   VITE_FLOWSTA_CLIENT_ID    your dev.flowsta.com client_id (only if you
-#                             want Flowsta OAuth wired in)
 
 on:
   push:
     tags:
-      - "fieldnotes-v*.*.*"
-
-permissions:
-  contents: write
+      - 'fieldnotes-v*.*.*'
 
 jobs:
-  create-release:
-    runs-on: ubuntu-latest
-    outputs:
-      release_id: ${{ steps.create-release.outputs.result }}
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Get version from tag
-        id: version
-        run: echo "version=${GITHUB_REF_NAME#fieldnotes-v}" >> $GITHUB_OUTPUT
-
-      - name: Create GitHub Release
-        id: create-release
-        uses: actions/github-script@v8
-        with:
-          script: |
-            const version = "${{ steps.version.outputs.version }}";
-            // Tags like fieldnotes-v1.4.0 are stable; -betaN / -rcN are
-            // pre-releases. Marking pre-releases correctly keeps them out
-            // of GitHub's "Latest" slot when published.
-            const isPrerelease = version.includes('-');
-            const body = [
-              `## Fieldnotes v${version}`,
-              '',
-              "**A Holochain desktop app for structured scenario testing: run a shared script of test scenarios, record what you find, and have every finding live on a peer-to-peer network owned by the people doing the testing.**",
-              '',
-              'Fieldnotes is a free, open-source desktop app for structured scenario testing:',
-              '',
-              "- **Shared scenario boards.** A campaign of test scenarios that every tester sees, with per-tester verdicts (Pass / Fail / Partial / Skip) and an append-only thread of findings, so nothing is silently overwritten.",
-              "- **Owned by the testers.** Scenarios, verdicts, and findings live on a peer-to-peer Holochain network replicated across everyone running the app. There is no central server holding the results.",
-              '- **Encrypted attachments.** Attach a screenshot or log to your finding, encrypted so only the administrator cohort can read it; peers store the ciphertext but cannot read it.',
-              '',
-              'Built on **[Flowsta Vault](https://flowsta.com/vault/)** (your identity and keys stay on your own machine). Every tester links a verified identity, so contributions resolve to a real person across devices, and a one-click export hands you a complete portable copy of everything you have authored.',
-              '',
-              "### What's new in this release",
-              '<!-- Edit this section with the highlights for this release: new features, fixes, security/integrity changes. -->',
-              '- _See the commit history for full details._',
-              '',
-              '### Downloads',
-              'Pick your platform from the assets below:',
-              '- **Linux** — `.deb`, `.rpm`, or `.AppImage`',
-              '- **macOS** — `.dmg` (Intel or Apple Silicon)',
-              '- **Windows** — `.exe` installer or `.msi` (unsigned alpha; SmartScreen will warn on first launch)',
-              '',
-              "**Verify your download (optional):** `sha256sum -c SHA256SUMS.txt` (Linux) or `shasum -a 256 -c SHA256SUMS.txt` (macOS).",
-            ].join('\n');
-            const { data } = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: context.ref.replace('refs/tags/', ''),
-              name: `Fieldnotes v${version}`,
-              body,
-              draft: true,
-              prerelease: isPrerelease,
-            });
-            return data.id;
-
-  build:
-    needs: create-release
+  publish:
+    permissions:
+      contents: write
     strategy:
       fail-fast: false
       matrix:
         include:
-          - platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
           - platform: macos-latest
             target: aarch64-apple-darwin
           - platform: macos-latest
             target: x86_64-apple-darwin
-          # Pinned to windows-2022 (VS 2022) — matches Vault's pin; newer
-          # windows-latest images may break aws-lc-sys 0.33.x compilation.
+          - platform: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
           - platform: windows-2022
             target: x86_64-pc-windows-msvc
-
     runs-on: ${{ matrix.platform }}
-
-    # Job-level env exposes secrets so that step-level `if:` conditionals
-    # can check for them (step-level env is evaluated AFTER the if, so
-    # secrets only set there can't gate the step itself).
-    #
-    # The FIELDNOTES_* vars are consumed by src-tauri/src/conductor.rs at
-    # compile time — empty values fall back to the source defaults
-    # (public Holochain dev bootstrap, no auth). The APPLE_* and
-    # ESIGNER_* vars are checked by the signing steps below; forks
-    # without those secrets get unsigned bundles, no signing-step failures.
-    env:
-      FIELDNOTES_BOOTSTRAP_URL: ${{ secrets.FIELDNOTES_BOOTSTRAP_URL }}
-      FIELDNOTES_SIGNAL_URL: ${{ secrets.FIELDNOTES_SIGNAL_URL }}
-      FIELDNOTES_RELAY_URL: ${{ secrets.FIELDNOTES_RELAY_URL }}
-      FIELDNOTES_AUTH_MATERIAL: ${{ secrets.FIELDNOTES_AUTH_MATERIAL }}
-      VITE_FLOWSTA_CLIENT_ID: ${{ secrets.VITE_FLOWSTA_CLIENT_ID }}
-      APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-      APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-      APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-      # APPLE_API_KEY_PATH is intentionally NOT exposed at job level —
-      # tauri-action would otherwise pick it up as an env var and try to
-      # pass the base64 contents (rather than a file path) to
-      # `xcrun notarytool --key`, which fails. It's only needed by the
-      # "Set up Apple API key" step below, where it's set step-scoped.
-      APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-      APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-      ESIGNER_USERNAME: ${{ secrets.ESIGNER_USERNAME }}
-      ESIGNER_PASSWORD: ${{ secrets.ESIGNER_PASSWORD }}
-      ESIGNER_CREDENTIAL_ID: ${{ secrets.ESIGNER_CREDENTIAL_ID }}
-      ESIGNER_TOTP_SECRET: ${{ secrets.ESIGNER_TOTP_SECRET }}
-
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v4
 
       - name: Install system dependencies (Linux)
-        if: matrix.platform == 'ubuntu-22.04'
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            libgtk-3-dev \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
-            patchelf
+            patchelf \
+            libgtk-3-dev
 
       - name: Setup Node.js
-        uses: actions/setup-node@v5
+        uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: lts/*
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
@@ -169,21 +54,8 @@ jobs:
       - name: Rust cache
         uses: swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
-          cache-on-failure: true
+          workspaces: ./src-tauri -> target
 
-      # Bundled conductor + keystore: download the official Holochain 0.6.1
-      # release binaries instead of `cargo install` from source. These are
-      # the exact artifacts the production conductors run; skipping the
-      # from-source compile cuts the build by roughly an hour. Holochain
-      # publishes binaries for all four target triples; lair-keystore ships
-      # in the same release (the 0.6.3 lair that 0.6.1 pins).
-      #
-      # We rename the binaries to a `fieldnotes-` prefix on download so
-      # the resulting .deb / .msi etc. ship them as
-      # /usr/bin/fieldnotes-{holochain,lair-keystore} — avoiding the
-      # collision with other Tauri/Holochain apps (e.g. Flowsta Vault)
-      # that also ship binaries with the bare names.
       - name: Fetch Holochain 0.6.1 binaries (Unix)
         if: runner.os != 'Windows'
         env:
@@ -216,203 +88,26 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      # macOS code signing — only runs when the Apple secrets are
-      # configured. A fork without an Apple Developer account will
-      # produce unsigned bundles (Gatekeeper will warn on first launch).
-      - name: Import Apple certificate (macOS)
-        if: runner.os == 'macOS' && env.APPLE_CERTIFICATE != ''
-        run: |
-          CERTIFICATE_PATH=$RUNNER_TEMP/certificate.p12
-          KEYCHAIN_PATH=$RUNNER_TEMP/app-signing.keychain-db
-          echo -n "$APPLE_CERTIFICATE" | base64 --decode -o $CERTIFICATE_PATH
-          security create-keychain -p "" $KEYCHAIN_PATH
-          security set-keychain-settings -lut 21600 $KEYCHAIN_PATH
-          security unlock-keychain -p "" $KEYCHAIN_PATH
-          security import $CERTIFICATE_PATH -P "$APPLE_CERTIFICATE_PASSWORD" -A -t cert -f pkcs12 -k $KEYCHAIN_PATH
-          security set-key-partition-list -S apple-tool:,apple: -k "" $KEYCHAIN_PATH
-          security list-keychains -d user -s $KEYCHAIN_PATH login.keychain-db
-
-      - name: Set up Apple API key (macOS)
-        if: runner.os == 'macOS' && env.APPLE_API_KEY != ''
-        # Step-scoped so APPLE_API_KEY_PATH doesn't leak into later
-        # steps (tauri-action mishandles it — see job-level env note).
-        env:
-          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
-        run: |
-          mkdir -p ~/private_keys
-          echo -n "$APPLE_API_KEY_PATH" | base64 --decode -o ~/private_keys/AuthKey_${APPLE_API_KEY}.p8
-
-      # Windows code signing via SSL.com eSigner — only runs when the
-      # ESIGNER secrets are configured. Without them, the Windows bundle
-      # is unsigned (SmartScreen will warn on first launch).
-      - name: Setup Java (Windows)
-        if: runner.os == 'Windows' && env.ESIGNER_USERNAME != ''
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Download CodeSignTool (Windows)
-        if: runner.os == 'Windows' && env.ESIGNER_USERNAME != ''
-        shell: pwsh
-        run: |
-          $url = "https://github.com/SSLcom/CodeSignTool/releases/download/v1.3.2/CodeSignTool-v1.3.2.zip"
-          $zip = Join-Path $env:RUNNER_TEMP "CodeSignTool.zip"
-          $dest = Join-Path $env:RUNNER_TEMP "CodeSignTool"
-          Invoke-WebRequest -Uri $url -OutFile $zip
-          Expand-Archive -Path $zip -DestinationPath $dest -Force
-          "CODE_SIGN_TOOL_DIR=$dest" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      # Pre-release tags (e.g. fieldnotes-v1.4.0-beta1) skip the MSI bundle
-      # on Windows: the MSI bundler rejects non-numeric pre-release
-      # identifiers. NSIS has no such restriction.
-      - name: Compute Tauri bundle args
-        id: tauri_args
-        shell: bash
-        run: |
-          EXTRA=""
-          VERSION="${GITHUB_REF_NAME#fieldnotes-v}"
-          if [[ "$RUNNER_OS" == "Windows" ]] && [[ "$VERSION" == *-* ]]; then
-            EXTRA=" --bundles nsis"
-            echo "Pre-release detected ($VERSION) — skipping MSI bundle on Windows"
-          fi
-          echo "extra=$EXTRA" >> "$GITHUB_OUTPUT"
-
-      # Build + sign. The Apple and ESIGNER secrets below are read by
-      # tauri-action; absent secrets produce unsigned bundles. The
-      # `APPLE_SIGNING_IDENTITY: '-'` fallback when not on macOS keeps
-      # tauri-action's signing step from erroring on Linux/Windows.
-      - name: Build Tauri app
+      - name: Build and release (unsigned)
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Empty signing identity when the secret isn't configured, so
-          # tauri-action skips codesigning entirely and produces an unsigned
-          # bundle (alpha). A real identity here would enable signing.
-          APPLE_SIGNING_IDENTITY: ${{ runner.os == 'macOS' && env.APPLE_SIGNING_IDENTITY != '' && env.APPLE_SIGNING_IDENTITY || '' }}
+          VITE_FLOWSTA_CLIENT_ID: ${{ secrets.VITE_FLOWSTA_CLIENT_ID }}
+          FIELDNOTES_BOOTSTRAP_URL: ${{ secrets.FIELDNOTES_BOOTSTRAP_URL }}
+          FIELDNOTES_SIGNAL_URL: ${{ secrets.FIELDNOTES_SIGNAL_URL }}
+          FIELDNOTES_RELAY_URL: ${{ secrets.FIELDNOTES_RELAY_URL }}
+          FIELDNOTES_AUTH_MATERIAL: ${{ secrets.FIELDNOTES_AUTH_MATERIAL }}
         with:
-          releaseId: ${{ needs.create-release.outputs.release_id }}
-          args: --target ${{ matrix.target }}${{ steps.tauri_args.outputs.extra }}
+          tagName: ${{ github.ref_name }}
+          releaseName: 'Fieldnotes ${{ github.ref_name }}'
+          releaseBody: |
+            Unsigned alpha build. Download the installer for your platform below.
 
-      - name: Dump Windows signing transcript on failure
-        if: failure() && runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          $log = Join-Path $env:RUNNER_TEMP "sign-windows.log"
-          if (Test-Path $log) {
-            Write-Host "===== sign-windows.log ====="
-            Get-Content $log
-            Write-Host "===== end log ====="
-          } else {
-            Write-Host "No sign-windows.log at $log"
-          }
+            **macOS**: the app is not signed or notarised. Right-click the app and choose Open, or run `xattr -dr com.apple.quarantine /Applications/Fieldnotes.app` after installing.
+            **Windows**: SmartScreen will warn on first launch. Click "More info" then "Run anyway".
+            **Linux**: `.deb`, `.rpm`, and `.AppImage` are provided.
 
-  publish-release:
-    needs: [create-release, build]
-    runs-on: ubuntu-latest
-    steps:
-      - name: Rename release assets
-        uses: actions/github-script@v8
-        env:
-          release_id: ${{ needs.create-release.outputs.release_id }}
-        with:
-          script: |
-            const releaseId = process.env.release_id;
-            const { data: assets } = await github.rest.repos.listReleaseAssets({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: releaseId,
-            });
-
-            // Tauri's auto-update tarballs ship without the version in
-            // their filename ("Fieldnotes_aarch64.app.tar.gz"); inject it
-            // in the rename so they end up consistent with the .dmg
-            // naming.
-            const version = context.ref.replace('refs/tags/fieldnotes-v', '');
-
-            const renames = {
-              '_aarch64.dmg': '-macOS-Apple-Silicon.dmg',
-              '_x64.dmg': '-macOS-Intel.dmg',
-              '_amd64.deb': '-Linux.deb',
-              '-1.x86_64.rpm': '-Linux.rpm',
-              '_x64-setup.exe': '-Windows-Setup.exe',
-              '_x64_en-US.msi': '-Windows.msi',
-              '_aarch64.app.tar.gz': `_${version}-macOS-Apple-Silicon.app.tar.gz`,
-              '_x64.app.tar.gz': `_${version}-macOS-Intel.app.tar.gz`,
-              '_aarch64.app.tar.gz.sig': `_${version}-macOS-Apple-Silicon.app.tar.gz.sig`,
-              '_x64.app.tar.gz.sig': `_${version}-macOS-Intel.app.tar.gz.sig`,
-            };
-
-            for (const asset of assets) {
-              for (const [oldSuffix, newSuffix] of Object.entries(renames)) {
-                if (asset.name.endsWith(oldSuffix)) {
-                  const newName = asset.name.replace(oldSuffix, newSuffix);
-                  console.log(`Renaming: ${asset.name} → ${newName}`);
-                  await github.rest.repos.updateReleaseAsset({
-                    owner: context.repo.owner,
-                    repo: context.repo.repo,
-                    asset_id: asset.id,
-                    name: newName,
-                  });
-                  break;
-                }
-              }
-            }
-
-      # Hash every published asset (after the renames above, so the names in
-      # SHA256SUMS.txt match the final download filenames) and attach the
-      # checksums file to the release. Lets users verify a downloaded binary
-      # with `sha256sum -c SHA256SUMS.txt`.
-      - name: Generate SHA256 checksums
-        uses: actions/github-script@v8
-        env:
-          release_id: ${{ needs.create-release.outputs.release_id }}
-        with:
-          script: |
-            const crypto = require('crypto');
-            const releaseId = Number(process.env.release_id);
-            const { owner, repo } = context.repo;
-
-            const { data: assets } = await github.rest.repos.listReleaseAssets({
-              owner, repo, release_id: releaseId, per_page: 100,
-            });
-
-            // Drop a stale checksums file from a previous run so the re-upload
-            // below doesn't collide on the asset name.
-            for (const a of assets) {
-              if (a.name === 'SHA256SUMS.txt') {
-                await github.rest.repos.deleteReleaseAsset({ owner, repo, asset_id: a.id });
-              }
-            }
-
-            const lines = [];
-            for (const a of assets) {
-              if (a.name === 'SHA256SUMS.txt') continue;
-              const res = await github.request(
-                'GET /repos/{owner}/{repo}/releases/assets/{asset_id}',
-                { owner, repo, asset_id: a.id, headers: { accept: 'application/octet-stream' } }
-              );
-              const hash = crypto.createHash('sha256').update(Buffer.from(res.data)).digest('hex');
-              lines.push(`${hash}  ${a.name}`);
-              console.log(`${hash}  ${a.name}`);
-            }
-            lines.sort();
-
-            await github.rest.repos.uploadReleaseAsset({
-              owner, repo, release_id: releaseId,
-              name: 'SHA256SUMS.txt',
-              data: lines.join('\n') + '\n',
-            });
-
-      - name: Publish release
-        uses: actions/github-script@v8
-        env:
-          release_id: ${{ needs.create-release.outputs.release_id }}
-        with:
-          script: |
-            github.rest.repos.updateRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              release_id: process.env.release_id,
-              draft: false,
-            });
+            Network: this alpha uses Holochain's public dev-test bootstrap server (intermittent, no uptime guarantees). A self-hosted bootstrap is a planned post-alpha step.
+          releaseDraft: true
+          prerelease: false
+          args: --target ${{ matrix.target }}
